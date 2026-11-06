@@ -11,6 +11,7 @@
 - Non-recursive CTEs, nested SELECTs, correlated EXISTS and UNION/INTERSECT/EXCEPT with source-level policy filtering.
 - Real local Qwen inference, semantic pseudonyms, AST restoration and bounded correction.
 - Local Spider/BIRD-style execution-agreement runner with read-only SQLite and explicit error/exclusion counts.
+- Redis exact-question draft cache, tested against Redis in CI for round-trip storage, policy scoping and 24-hour expiration settings.
 - Offline MiniLM anchors and authorized foreign-key graph expansion.
 - SQL/result inspection, session history, activity viewer and live-query CLI.
 - Combined local startup script, stable encryption key and repeatable migrations.
@@ -18,7 +19,6 @@
 ## Implemented with runtime verification still open
 - Full local Supabase account, OAuth and Storage journeys. Docker's Linux engine currently cannot start on this machine.
 - Organization UI using live Supabase sessions. Database/API tests use injected identities and real PostgreSQL fixtures.
-- Redis exact-question SQL cache. No Redis service is running here.
 - Updated combined launcher requires a working Docker engine before its Supabase stage can be exercised.
 
 ## Original requirements still requiring implementation
