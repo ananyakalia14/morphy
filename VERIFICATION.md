@@ -46,3 +46,7 @@ Source-level filtering passed for CTEs shadowing table names, nested SELECTs, co
 
 ## Execution evaluation runner
 The backend unit run passed 30 tests with one service-dependent integration skipped. New coverage verifies row multiplicity and ordering, protected dataset paths, BIRD-style fields, unchanged database bytes, result-cap exclusions and model/error outcomes. The real local Qwen smoke evaluation agreed on all three synthetic questions. See docs/evaluation-smoke.json.
+
+
+## Dashboard panel verification
+The local PostgreSQL fixture run passed 31 tests, including saved-panel rendering for a VIEW_ONLY user whose row policy differs from the author’s. Request-supplied SQL was ignored, arbitrary query execution stayed denied, a wrong dashboard ID returned 404 and unsharing the saved query removed panel visibility. The first optional model-inclusive run failed because Ollama was offline; the database/API run passed after separating inference from this integration.

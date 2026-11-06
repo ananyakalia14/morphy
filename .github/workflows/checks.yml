@@ -59,3 +59,15 @@ jobs:
           for migration in migrations/*.sql; do psql -X -v ON_ERROR_STOP=1 -f "$migration"; done
           psql -X -v ON_ERROR_STOP=1 -f tests/control-plane.sql
           psql -X -v ON_ERROR_STOP=1 -f tests/saved-queries.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/dashboards.sql
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r backend/requirements.txt pytest
+      - name: Verify live PostgreSQL API policy integration
+        env:
+          MORPHY_INTEGRATION_DSN: postgresql://postgres@127.0.0.1:55422/postgres
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          MORPHY_EMBEDDINGS: "off"
+        run: python -m pytest tests/test_live_engine.py -q
+        working-directory: backend

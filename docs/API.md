@@ -66,3 +66,8 @@ GET /health reports API availability.
 
 Sample data is independent of organization authorization and must be labeled wherever presented.
 
+
+
+## Dashboard panels
+
+POST /engine/dashboards/{dashboard_id}/panels/{query_id}/render executes the visible stored query under the caller’s current data policy. VIEW_ONLY is supported for this saved-panel action. See [DASHBOARDS.md](DASHBOARDS.md) for definition CRUD, visibility and panel ordering.

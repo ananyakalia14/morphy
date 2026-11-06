@@ -2,6 +2,7 @@
 
 ## Working and tested
 - Private and organization-shared saved SQL definitions with current database permissions and revision-checked client edits.
+- Dashboard definitions, panel references and viewer-policy result rendering.
 - Neo-brutalist web frontend and six-animal animation package.
 - Supabase schema, authenticated RPCs, organization ownership, invitations and custom roles.
 - Role and user policy intersections, table/column allowlists and equality row predicates.
@@ -22,7 +23,7 @@
 ## Original requirements still requiring implementation
 - MySQL, MariaDB, Snowflake, BigQuery, DuckDB, ClickHouse, MongoDB and Parquet connectors.
 - Redis HNSW semantic SQL cache, Cuckoo-filter username acceleration and Redis Streams audit worker.
-- Dashboard resources, result sharing and viewer-facing website/terminal flows.
+- Dashboard layout/chart configuration and viewer-facing website/terminal integration.
 - Frontier-provider benchmark mode and opt-in egress controls.
 - Official Spider/BIRD dataset runs, official scoring and representative performance measurements.
 - Full-screen production database connection wizard and interactive terminal autocomplete.
