@@ -1,0 +1,34 @@
+import {createRequire} from "node:module";
+import {fileURLToPath} from "node:url";
+import assert from "node:assert/strict";
+const require=createRequire(import.meta.url);
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||"playwright-core");
+const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||"C:/Program Files/Google/Chrome/Application/chrome.exe",headless:true});
+const page=await browser.newPage({viewport:{width:1440,height:1000}});
+const errors=[];
+page.on("pageerror",e=>errors.push(e.message));
+try{
+ await page.goto("http://127.0.0.1:5173/#explore");
+ await page.getByRole("button",{name:"Generate & run"}).click();
+ await page.locator("tbody tr").first().waitFor();
+ assert.ok((await page.locator("tbody").innerText()).includes("Analytics"));
+ await page.getByRole("button",{name:"Governed SQL",exact:true}).click();
+ assert.ok((await page.locator(".compiled pre").innerText()).includes("APAC"));
+ await page.getByLabel("SQL query",{exact:true}).fill("SELECT email FROM customers");
+ await page.getByRole("button",{name:"Run query",exact:false}).click();
+ await page.getByRole("alert").waitFor();
+ assert.equal(await page.locator("tbody tr").count(),0);
+ await page.getByLabel("SQL query",{exact:true}).fill("SELECT region FROM orders WHERE 1=1 OR region='EMEA'");
+ await page.getByRole("button",{name:"Run query",exact:false}).click();
+ await page.locator("tbody tr").first().waitFor();
+ assert.ok(!(await page.locator("tbody").innerText()).includes("EMEA"));
+ await page.screenshot({path:fileURLToPath(new URL("../workbench-desktop.png",import.meta.url)),fullPage:true});
+ await page.reload();
+ await page.getByRole("button",{name:"Generate & run"}).click();
+ await page.locator("tbody tr").first().waitFor();
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:fileURLToPath(new URL("../workbench-mobile.png",import.meta.url)),fullPage:true});
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ assert.deepEqual(errors,[]);
+ console.log("PASS · browser → API → SQLite → results, generated example, protected column, OR-filter bypass, refresh, mobile layout, zero runtime errors");
+}finally{await browser.close()}

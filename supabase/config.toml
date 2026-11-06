@@ -1,0 +1,26 @@
+project_id = "morphy-phase-one"
+[api]
+port = 55421
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+[db]
+port = 55422
+shadow_port = 55420
+major_version = 17
+[studio]
+port = 55423
+[inbucket]
+port = 55424
+[auth]
+site_url = "http://127.0.0.1:5173"
+additional_redirect_urls = ["http://localhost:5173", "http://127.0.0.1:5173"]
+enable_signup = true
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+[storage]
+enabled = true
+file_size_limit = "3MiB"
+[analytics]
+enabled = false
+

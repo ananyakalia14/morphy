@@ -1,0 +1,399 @@
+import json
+import time
+import uuid
+import asyncpg
+import httpx
+from cryptography.exceptions import InvalidTag
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.routing import APIRoute
+from pydantic import BaseModel, Field, SecretStr
+from sqlglot.errors import SqlglotError
+from .config import Settings
+from .security import check_uri, encrypt_uri, decrypt_uri, compile_query
+from .postgres import connection, reflect
+from .nl2sql import draft
+from .cache import generation_key, read_draft, store_draft
+from .imported import read_csv, execute_csv
+from starlette.concurrency import run_in_threadpool
+from fastapi import Request
+import sqlite3
+
+
+class EngineRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def guarded(request):
+            try:
+                return await handler(request)
+            except (asyncpg.PostgresError, OSError, TimeoutError):
+                raise HTTPException(
+                    502,
+                    "The database or control plane is unavailable. Check the server configuration.",
+                )
+
+        return guarded
+
+
+router = APIRouter(
+    prefix="/api/engine", tags=["Live PostgreSQL engine"], route_class=EngineRoute
+)
+
+
+def settings():
+    try:
+        return Settings.load()
+    except (ValueError, KeyError):
+        raise HTTPException(
+            503,
+            "Configure the live engine server environment before connecting databases.",
+        )
+
+
+async def identity(authorization: str = Header(default=""), config=Depends(settings)):
+    if not authorization.startswith("Bearer ") or len(authorization) > 12000:
+        raise HTTPException(401, "Sign in to use the live engine.")
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            response = await client.get(
+                config.supabase_url + "/auth/v1/user",
+                headers={"apikey": config.supabase_key, "Authorization": authorization},
+            )
+        if response.status_code != 200:
+            raise HTTPException(401, "Your session is invalid or expired.")
+        return uuid.UUID(response.json()["id"])
+    except (httpx.HTTPError, KeyError, ValueError):
+        raise HTTPException(503, "Session verification is temporarily unavailable.")
+
+
+async def control(config):
+    return await asyncpg.connect(config.control_dsn, timeout=8, command_timeout=8)
+
+
+class ConnectInput(BaseModel):
+    uri: SecretStr = Field(min_length=8, max_length=2048)
+
+
+class QueryInput(BaseModel):
+    sql: str = Field(min_length=1, max_length=12000)
+
+
+class QuestionInput(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+
+
+async def authorized_target(database_id, user, config):
+    conn = await control(config)
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('request.jwt.claim.sub',$1,true)", str(user)
+            )
+            raw = await conn.fetchval(
+                "SELECT public.effective_permission($1)", database_id
+            )
+            policy = json.loads(raw) if isinstance(raw, str) else raw
+            if not policy or policy.get("mode") not in {"QUERY_ONLY", "SCHEMA_EDIT"}:
+                raise HTTPException(
+                    403, "Your current database policy does not allow queries."
+                )
+            row = await conn.fetchrow(
+                """
+                SELECT t.org_id,s.encrypted_credential,s.key_version FROM public.target_databases t
+                JOIN morphy_private.connection_secrets s ON s.database_id=t.id
+                WHERE t.id=$1 AND t.dialect IN ('postgres','sqlite')
+            """,
+                database_id,
+            )
+            if not row:
+                raise HTTPException(
+                    409, "An administrator must connect this PostgreSQL database first."
+                )
+            if row["key_version"] not in {"aesgcm-v1", "csv-v1"}:
+                raise HTTPException(
+                    409,
+                    "This connection needs to be saved again using the current engine.",
+                )
+            try:
+                uri = decrypt_uri(
+                    row["encrypted_credential"], config.encryption_key, database_id
+                )
+            except InvalidTag:
+                raise HTTPException(
+                    503,
+                    "The connection key does not match. Check the server encryption key.",
+                )
+            if row["key_version"] == "aesgcm-v1":
+                check_uri(uri, config.target_hosts)
+            return uri, policy, row["org_id"], row["key_version"]
+    finally:
+        await conn.close()
+
+
+async def require_admin(conn, database_id, user, dialect):
+    row = await conn.fetchrow(
+        """
+        SELECT t.org_id FROM public.target_databases t
+        JOIN public.organizations o ON o.id=t.org_id
+        JOIN public.memberships m ON m.org_id=o.id AND m.user_id=$2
+        JOIN public.roles r ON r.id=m.role_id
+        WHERE t.id=$1 AND t.dialect=$3 AND r.builtin AND r.name='ADMIN'
+        FOR UPDATE OF o
+    """,
+        database_id,
+        user,
+        dialect,
+    )
+    if not row:
+        raise HTTPException(
+            403, "An organization administrator must configure the connection."
+        )
+    return row
+
+
+@router.put("/databases/{database_id}/connection")
+async def connect(
+    database_id: uuid.UUID,
+    payload: ConnectInput,
+    user=Depends(identity),
+    config=Depends(settings),
+):
+    conn = await control(config)
+    try:
+        async with conn.transaction():
+            # Serialize with policy and ownership changes in the control plane.
+            row = await require_admin(conn, database_id, user, "postgres")
+            uri = payload.uri.get_secret_value()
+            check_uri(uri, config.target_hosts)
+            async with connection(uri) as target:
+                schema = await reflect(target)
+            encrypted = encrypt_uri(uri, config.encryption_key, database_id)
+            await conn.execute(
+                """
+                INSERT INTO morphy_private.connection_secrets(database_id,encrypted_credential,key_version)
+                VALUES($1,$2,'aesgcm-v1') ON CONFLICT(database_id) DO UPDATE
+                SET encrypted_credential=excluded.encrypted_credential,key_version=excluded.key_version
+            """,
+                database_id,
+                encrypted,
+            )
+            await conn.execute(
+                "INSERT INTO public.audit_events(org_id,actor_id,action,subject_id) VALUES($1,$2,'connection.saved',$3)",
+                row["org_id"],
+                user,
+                database_id,
+            )
+            return {"status": "connected", "tables": len(schema)}
+    except ValueError as error:
+        raise HTTPException(422, str(error))
+    except (asyncpg.PostgresError, OSError, TimeoutError):
+        raise HTTPException(
+            502,
+            "The database connection or control plane is unavailable. Check the server settings and read-only database credentials.",
+        )
+    finally:
+        await conn.close()
+
+
+@router.get("/databases/{database_id}/schema")
+async def schema(
+    database_id: uuid.UUID, user=Depends(identity), config=Depends(settings)
+):
+    uri, policy, _, kind = await authorized_target(database_id, user, config)
+    if kind == "csv-v1":
+        reflected, _ = await run_in_threadpool(read_csv, uri)
+    else:
+        async with connection(uri) as target:
+            reflected = await reflect(target)
+    allowed = {
+        t: {c: reflected[t][c] for c in cols if c in reflected[t]}
+        for t, cols in policy["table_columns"].items()
+        if t in reflected
+    }
+    return {
+        "dialect": "sqlite" if kind == "csv-v1" else "postgres",
+        "tables": {t: cols for t, cols in allowed.items() if cols},
+    }
+
+
+async def audit_query(config, org, user, database_id):
+    audit = await control(config)
+    try:
+        await audit.execute(
+            "INSERT INTO public.audit_events(org_id,actor_id,action,subject_id) VALUES($1,$2,'query.started',$3)",
+            org,
+            user,
+            database_id,
+        )
+    finally:
+        await audit.close()
+
+
+@router.post("/databases/{database_id}/query")
+async def query(
+    database_id: uuid.UUID,
+    payload: QueryInput,
+    user=Depends(identity),
+    config=Depends(settings),
+):
+    uri, policy, org, kind = await authorized_target(database_id, user, config)
+    started = time.perf_counter()
+    try:
+        if kind == "csv-v1":
+            await audit_query(config, org, user, database_id)
+            result = await run_in_threadpool(execute_csv, uri, policy, payload.sql)
+            return {
+                **result,
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+            }
+        async with connection(uri) as target:
+            reflected = await reflect(target)
+            sql = compile_query(payload.sql, reflected, policy)
+            # Fail closed if the durable query-intent audit cannot be written.
+            await audit_query(config, org, user, database_id)
+            # Bound response memory as well as row count.
+            records = []
+            size = 0
+            statement = await target.prepare(sql)
+            async for row in statement.cursor(prefetch=25):
+                values = list(row.values())
+                size += sum(len(str(v)) for v in values)
+                if size > 2_000_000:
+                    raise HTTPException(
+                        413, "The result exceeds 2 MB. Select fewer columns or rows."
+                    )
+                records.append(values)
+            return {
+                "columns": [a.name for a in statement.get_attributes()],
+                "rows": records,
+                "row_count": len(records),
+                "sql": sql,
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+            }
+    except PermissionError as error:
+        raise HTTPException(403, str(error))
+    except (ValueError, SqlglotError, sqlite3.Error):
+        raise HTTPException(
+            422, "The SQL could not be validated against your permitted schema."
+        )
+    except (asyncpg.PostgresError, OSError, TimeoutError):
+        raise HTTPException(
+            502,
+            "The query could not complete. Check the database and simplify the query.",
+        )
+
+
+@router.post("/databases/{database_id}/generate")
+async def generate(
+    database_id: uuid.UUID,
+    payload: QuestionInput,
+    user=Depends(identity),
+    config=Depends(settings),
+):
+    uri, policy, _, kind = await authorized_target(database_id, user, config)
+    if kind == "csv-v1":
+        reflected, _ = await run_in_threadpool(read_csv, uri)
+        edges = []
+    else:
+        async with connection(uri) as target:
+            reflected = await reflect(target)
+            edges = await target.fetch("""
+                SELECT a.relname, ac.attname, b.relname, bc.attname
+                FROM pg_constraint k JOIN pg_class a ON a.oid=k.conrelid
+                JOIN pg_class b ON b.oid=k.confrelid
+                CROSS JOIN LATERAL unnest(k.conkey,k.confkey) pair(src,dst)
+                JOIN pg_attribute ac ON ac.attrelid=k.conrelid AND ac.attnum=pair.src
+                JOIN pg_attribute bc ON bc.attrelid=k.confrelid AND bc.attnum=pair.dst
+                WHERE k.contype='f' AND a.relnamespace='public'::regnamespace
+                AND b.relnamespace='public'::regnamespace
+            """)
+    try:
+        dialect = "sqlite" if kind == "csv-v1" else "postgres"
+        key = generation_key(
+            database_id, payload.question, config.ollama_model, reflected, policy, edges
+        )
+        cached = await read_draft(key)
+        if cached:
+            compile_query(cached, reflected, policy, dialect=dialect)
+            return {
+                "sql": cached,
+                "provider": config.ollama_model,
+                "requires_execution": True,
+                "attempts": 0,
+                "cache": "hit",
+            }
+
+        async def check_plan(compiled):
+            if dialect == "postgres":
+                try:
+                    async with connection(uri) as target:
+                        await target.prepare(compiled)
+                except asyncpg.PostgresError as error:
+                    raise ValueError(
+                        "PostgreSQL validation: " + str(error.sqlstate)
+                    ) from error
+
+        result = await draft(
+            config, payload.question, reflected, policy, edges, check_plan
+        )
+        if kind == "csv-v1":
+            from sqlglot import transpile
+
+            result["sql"] = transpile(result["sql"], read="postgres", write="sqlite")[0]
+            compile_query(result["sql"], reflected, policy, dialect="sqlite")
+        await store_draft(key, result["sql"])
+        return {**result, "cache": "miss"}
+    except httpx.HTTPError:
+        raise HTTPException(
+            503, "Local model unavailable. Check Ollama and the configured model."
+        )
+    except (KeyError, ValueError, PermissionError, SqlglotError):
+        raise HTTPException(
+            422,
+            "No valid permitted query could be generated. Narrow the question or use the SQL editor.",
+        )
+
+
+@router.put("/databases/{database_id}/import")
+async def import_csv(
+    database_id: uuid.UUID,
+    request: Request,
+    user=Depends(identity),
+    config=Depends(settings),
+):
+    contents = bytearray()
+    async for chunk in request.stream():
+        if len(contents) + len(chunk) > 1_048_576:
+            raise HTTPException(413, "Choose a UTF-8 CSV up to 1 MB.")
+        contents.extend(chunk)
+    conn = await control(config)
+    try:
+        async with conn.transaction():
+            row = await require_admin(conn, database_id, user, "sqlite")
+            text = contents.decode("utf-8-sig")
+            reflected, records = await run_in_threadpool(read_csv, text)
+            blob = encrypt_uri(text, config.encryption_key, database_id)
+            await conn.execute(
+                """
+                INSERT INTO morphy_private.connection_secrets(database_id,encrypted_credential,key_version)
+                VALUES($1,$2,'csv-v1') ON CONFLICT(database_id) DO UPDATE
+                SET encrypted_credential=excluded.encrypted_credential,key_version=excluded.key_version
+            """,
+                database_id,
+                blob,
+            )
+            await conn.execute(
+                "INSERT INTO public.audit_events(org_id,actor_id,action,subject_id) VALUES($1,$2,'csv.imported',$3)",
+                row["org_id"],
+                user,
+                database_id,
+            )
+            return {
+                "table": "records",
+                "columns": list(reflected["records"]),
+                "rows": len(records),
+            }
+    except (ValueError, UnicodeError) as error:
+        raise HTTPException(422, str(error))
+    finally:
+        await conn.close()

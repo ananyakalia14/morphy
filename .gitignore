@@ -1,0 +1,17 @@
+node_modules/
+.venv/
+.local/
+.pytest_cache/
+dist/
+.env
+.env.local
+__pycache__/
+supabase/.temp/
+supabase/.branches/
+supabase/migrations/00000000000001_control_plane.sql
+
+.env.*
+!.env.example
+*.log
+*.egg-info/
+supabase/migrations/00000000000002_live_engine.sql
