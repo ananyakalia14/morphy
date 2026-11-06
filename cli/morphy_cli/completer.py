@@ -3,13 +3,29 @@
 from prompt_toolkit.completion import Completer, Completion
 
 
-# Commands available in all modes.
-_BASE_COMMANDS = [
+# Commands available in the interactive shell.
+_ALL_COMMANDS = [
     ("/help", "Show available commands"),
     ("/schema", "Display the permitted database schema"),
     ("/examples", "List curated example questions"),
     ("/ask", "Generate SQL from a natural-language question"),
     ("/sql", "Execute a read-only SQL query"),
+    ("/login", "Sign in with email and password"),
+    ("/logout", "Sign out and clear saved credentials"),
+    ("/status", "Display authentication, active org and database status"),
+    ("/orgs", "List your organizations"),
+    ("/use-org", "Switch active organization context (/use-org <id>)"),
+    ("/dbs", "List databases in active organization"),
+    ("/use-db", "Switch active target database context (/use-db <id|sample>)"),
+    ("/connect", "Save and verify PostgreSQL connection (/connect <uri>)"),
+    ("/import", "Import UTF-8 CSV into active database (/import <file.csv>)"),
+    ("/profile", "View or claim your user profile"),
+    ("/members", "List members of active organization"),
+    ("/invites", "List pending invitations"),
+    ("/invite", "Invite a user to active organization (/invite <username>)"),
+    ("/accept", "Accept an organization invitation (/accept <id>)"),
+    ("/export", "Export last query result to CSV file (/export <file.csv>)"),
+    ("/json", "Display last query result formatted as JSON"),
     ("/exit", "Leave the session"),
     ("/quit", "Leave the session"),
 ]
@@ -19,7 +35,7 @@ class SlashCompleter(Completer):
     """Tab-complete slash commands in the MORPHY REPL."""
 
     def __init__(self, *, is_live: bool = False):
-        self._commands = list(_BASE_COMMANDS)
+        self._commands = list(_ALL_COMMANDS)
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor.lstrip()

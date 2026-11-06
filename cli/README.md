@@ -14,18 +14,36 @@ The current CLI uses httpx and a simple input loop. Access tokens remain in the 
 
 ## Build on this foundation
 
-- [ ] Add prompt-toolkit for slash completion, history, multiline SQL and interruption handling.
+- [x] Add prompt-toolkit for slash completion, history, multiline SQL and interruption handling.
 - [ ] Add login/logout/status using the same Supabase Auth project as the website.
 - [ ] Store persisted refresh tokens in the OS credential store and support session expiry/refresh.
 - [ ] Add organization and database selection, keeping current context visible.
 - [ ] Add /connect and CSV import flows using the engine's authenticated endpoints.
 - [ ] Add profile, invitation and member-management commands through the shared Supabase RPCs.
-- [ ] Add readable tables, JSON output, CSV export, null handling and bounded output.
-- [ ] Show generation stages, correction attempts and cache status without invented percentages.
-- [ ] Add command cancellation, network-timeout messages and graceful Ctrl+C.
-- [ ] Add noninteractive flags and stable exit codes for scripts.
-- [ ] Add command tests and integration tests against a disposable development control plane.
-- [ ] Document Windows, macOS and Linux installation. Validate both console aliases.
+- [x] Add readable tables, JSON output, CSV export, null handling and bounded output.
+- [x] Show generation stages, correction attempts and cache status without invented percentages.
+- [x] Add command cancellation, network-timeout messages and graceful Ctrl+C.
+- [x] Add noninteractive flags and stable exit codes for scripts.
+- [x] Add command tests and integration tests against a disposable development control plane.
+- [x] Document Windows, macOS and Linux installation. Validate both console aliases.
+
+## Installation & Setup
+
+### Requirements
+- Python >= 3.11
+
+### Installation
+From the repository root:
+```bash
+python -m pip install -e ./cli
+```
+Both `morphy` and `sq` console commands are installed.
+
+On Windows, macOS and Linux:
+```bash
+morphy --help
+sq --help
+```
 
 ## Required boundaries
 

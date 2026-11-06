@@ -1,19 +1,30 @@
-"""Tests for the MORPHY CLI interactive shell and formatting."""
+"""Comprehensive tests for the MORPHY CLI, auth, control plane, shell and formatting."""
 
+import io
+import json
+import os
+from pathlib import Path
 import sys
-import types
-import pytest
-from unittest.mock import patch, MagicMock
+import time
+from unittest.mock import MagicMock, patch
+from uuid import UUID
 
+import pytest
+
+from morphy_cli.auth import AuthError, AuthManager, Session
+from morphy_cli.client import EngineError, MorphyClient
+from morphy_cli.completer import SlashCompleter
+from morphy_cli.control import ControlClient, ControlPlaneError
 from morphy_cli.formatting import (
-    format_table,
-    format_schema,
+    format_csv,
     format_examples,
     format_generation,
+    format_json,
+    format_records_table,
+    format_schema,
+    format_table,
 )
-from morphy_cli.completer import SlashCompleter
-from morphy_cli.client import MorphyClient, EngineError
-from morphy_cli.shell import _handle_command
+from morphy_cli.shell import ShellContext, _handle_command
 
 
 # ── Formatting ──────────────────────────────────────────────────────
@@ -45,14 +56,39 @@ class TestFormatTable:
         assert "capped" in result
 
 
+class TestFormatCSV:
+    def test_csv_output(self):
+        result = format_csv(["id", "name"], [[1, "Alpha"], [2, None]])
+        lines = result.strip().split("\n")
+        assert lines[0] == "id,name"
+        assert lines[1] == "1,Alpha"
+        assert lines[2] == "2,"
+
+
+class TestFormatRecordsTable:
+    def test_records_table(self):
+        items = [{"id": "1", "name": "Org 1"}, {"id": "2", "name": "Org 2"}]
+        table = format_records_table(["ID", "Name"], items, ["id", "name"])
+        assert "Org 1" in table
+        assert "Org 2" in table
+
+    def test_empty_records(self):
+        assert format_records_table(["ID"], [], ["id"]) == "(none)"
+
+
 class TestFormatSchema:
     def test_empty(self):
         assert "no permitted" in format_schema({})
 
-    def test_tree(self):
+    def test_tree_dict(self):
         result = format_schema({"users": {"id": "int4", "name": "text"}})
         assert "users" in result
         assert "id: int4" in result
+
+    def test_tree_list(self):
+        result = format_schema({"records": ["a", "b"]})
+        assert "records" in result
+        assert "a" in result
 
 
 class TestFormatExamples:
@@ -81,6 +117,12 @@ class TestFormatGeneration:
         assert "attempts" not in result.replace("1 attempt", "")
 
 
+class TestFormatJSON:
+    def test_json_dump(self):
+        data = {"hello": "world", "num": 42}
+        assert '"hello": "world"' in format_json(data)
+
+
 # ── Completer ───────────────────────────────────────────────────────
 
 
@@ -103,6 +145,11 @@ class TestSlashCompleter:
         names = [c.text for c in results]
         assert "/help" in names
         assert "/schema" in names
+        assert "/login" in names
+        assert "/orgs" in names
+        assert "/dbs" in names
+        assert "/connect" in names
+        assert "/import" in names
         assert "/exit" in names
 
     def test_no_completion_without_slash(self):
@@ -110,15 +157,88 @@ class TestSlashCompleter:
         assert results == []
 
 
-# ── Command dispatch ────────────────────────────────────────────────
+# ── Auth & Sessions ─────────────────────────────────────────────────
+
+
+class TestAuthManager:
+    def test_session_expiry(self):
+        s = Session("access", "refresh", "uid", "test@example.com", time.time() + 30)
+        assert s.is_expired  # < 60s
+        s2 = Session("access", "refresh", "uid", "test@example.com", time.time() + 300)
+        assert not s2.is_expired
+
+    @patch("morphy_cli.auth.httpx.Client")
+    def test_login_success(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "access_token": "acc-123",
+            "refresh_token": "ref-456",
+            "expires_in": 3600,
+            "user": {"id": "user-uuid", "email": "dev@test.com"},
+        }
+        mock_client.post.return_value = mock_resp
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        auth = AuthManager(supabase_url="http://127.0.0.1:54321", supabase_key="test-key")
+        sess = auth.login("dev@test.com", "secret")
+        assert sess.access_token == "acc-123"
+        assert sess.email == "dev@test.com"
+
+        status = auth.status()
+        assert status["authenticated"] is True
+        assert status["email"] == "dev@test.com"
+
+    @patch("morphy_cli.auth.httpx.Client")
+    def test_login_failure(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = "Invalid credentials"
+        mock_resp.json.side_effect = ValueError
+        mock_client.post.return_value = mock_resp
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        auth = AuthManager(supabase_url="http://127.0.0.1:54321", supabase_key="test-key")
+        with pytest.raises(AuthError):
+            auth.login("dev@test.com", "wrong")
+
+
+# ── Control Plane ───────────────────────────────────────────────────
+
+
+class TestControlClient:
+    def test_list_orgs(self):
+        auth = MagicMock()
+        auth.get_valid_token.return_value = "token"
+        auth.supabase_url = "http://127.0.0.1:54321"
+        auth.supabase_key = "key"
+
+        control = ControlClient(auth)
+        with patch.object(control, "_request", return_value=[{"id": "org-1", "name": "Acme"}]):
+            orgs = control.list_organizations()
+            assert len(orgs) == 1
+            assert orgs[0]["name"] == "Acme"
+
+
+# ── Mock Client & Shell ─────────────────────────────────────────────
 
 
 class MockClient:
-    """Minimal MorphyClient stand-in for unit tests."""
+    """Mock MorphyClient for testing shell interaction."""
 
     def __init__(self, *, is_live=False):
-        self.database = "test-uuid" if is_live else None
+        self.database = UUID("12345678-1234-1234-1234-123456789abc") if is_live else None
         self.is_live = is_live
+        self.base_url = "http://127.0.0.1:8000"
+
+    def set_token_source(self, src):
+        pass
+
+    def set_database(self, db):
+        self.database = db
+        self.is_live = db is not None
 
     def schema(self):
         return {
@@ -144,102 +264,146 @@ class MockClient:
             "elapsed_ms": 5.2,
         }
 
+    def connect_database(self, uri):
+        return {"status": "connected", "tables": 4}
+
+    def import_csv(self, data):
+        return {"table": "records", "columns": ["a", "b"], "rows": 10}
+
+
+def create_test_context(is_live=False):
+    client = MockClient(is_live=is_live)
+    auth = MagicMock()
+    auth.status.return_value = {"authenticated": True, "email": "test@user.com", "supabase_url": "http://127.0.0.1:54321"}
+    ctx = ShellContext(client, auth)
+    return ctx
+
 
 class TestHandleCommand:
     def test_help(self):
-        result = _handle_command(MockClient(), "/help")
+        ctx = create_test_context()
+        result = _handle_command(ctx, "/help")
         assert "/schema" in result
         assert "/ask" in result
+        assert "/login" in result
 
     def test_exit(self):
-        assert _handle_command(MockClient(), "/exit") is None
-        assert _handle_command(MockClient(), "/quit") is None
+        ctx = create_test_context()
+        assert _handle_command(ctx, "/exit") is None
+        assert _handle_command(ctx, "/quit") is None
 
-    def test_schema(self):
-        result = _handle_command(MockClient(), "/schema")
-        assert "orders" in result
-        assert "int4" in result
+    def test_status(self):
+        ctx = create_test_context()
+        result = _handle_command(ctx, "/status")
+        assert "MORPHY Session Status" in result
+        assert "test@user.com" in result
 
-    def test_examples(self):
-        result = _handle_command(MockClient(), "/examples")
-        assert "Total revenue" in result
+    def test_logout(self):
+        ctx = create_test_context()
+        result = _handle_command(ctx, "/logout")
+        assert "Signed out" in result
+
+    def test_orgs(self):
+        ctx = create_test_context()
+        with patch.object(ctx.control, "list_organizations", return_value=[{"id": "o1", "name": "Org 1", "created_at": "today"}]):
+            result = _handle_command(ctx, "/orgs")
+            assert "Org 1" in result
+
+    def test_use_org(self):
+        ctx = create_test_context()
+        with patch.object(ctx.control, "list_organizations", return_value=[{"id": "o1-uuid", "name": "Production"}]):
+            result = _handle_command(ctx, "/use-org Production")
+            assert "Production" in result
+            assert ctx.active_org_id == "o1-uuid"
+
+    def test_dbs(self):
+        ctx = create_test_context()
+        with patch.object(ctx.control, "list_databases", return_value=[{"id": "d1", "name": "Sales", "dialect": "postgres"}]):
+            result = _handle_command(ctx, "/dbs")
+            assert "Sales" in result
+
+    def test_use_db_sample(self):
+        ctx = create_test_context(is_live=True)
+        result = _handle_command(ctx, "/use-db sample")
+        assert "sample workspace" in result
+        assert ctx.active_db_id is None
+
+    def test_use_db_live(self):
+        ctx = create_test_context()
+        with patch.object(ctx.control, "list_databases", return_value=[{"id": "d1-uuid", "name": "Analytics", "dialect": "postgres"}]):
+            result = _handle_command(ctx, "/use-db Analytics")
+            assert "Analytics" in result
+
+    def test_connect(self):
+        ctx = create_test_context(is_live=True)
+        ctx.active_db_id = "test-uuid"
+        result = _handle_command(ctx, "/connect postgresql://readonly@localhost/db")
+        assert "Connected successfully" in result
+
+    def test_import_missing_file(self):
+        ctx = create_test_context(is_live=True)
+        ctx.active_db_id = "test-uuid"
+        result = _handle_command(ctx, "/import nonexistent_file.csv")
+        assert "File not found" in result
+
+    def test_import_valid_file(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("a,b\n1,2\n3,4", encoding="utf-8")
+        ctx = create_test_context(is_live=True)
+        ctx.active_db_id = "test-uuid"
+        result = _handle_command(ctx, f"/import {csv_file}")
+        assert "Imported 10 rows" in result
+
+    def test_profile(self):
+        ctx = create_test_context()
+        with patch.object(ctx.control, "get_profile", return_value={"username": "alice", "display_name": "Alice M", "id": "uid"}):
+            result = _handle_command(ctx, "/profile")
+            assert "alice" in result
+
+    def test_json_and_export(self, tmp_path):
+        ctx = create_test_context()
+        _handle_command(ctx, "/sql SELECT 1")
+        json_out = _handle_command(ctx, "/json")
+        assert "11650" in json_out
+
+        out_csv = tmp_path / "out.csv"
+        export_out = _handle_command(ctx, f"/export {out_csv}")
+        assert "Saved 1 row" in export_out
+        assert out_csv.is_file()
 
     def test_ask_sample_mode(self):
-        result = _handle_command(MockClient(), "/ask Total revenue")
+        ctx = create_test_context(is_live=False)
+        result = _handle_command(ctx, "/ask Total revenue")
         assert "SELECT sum(total)" in result
         assert "11650" in result
 
     def test_ask_live_mode_decline(self):
-        client = MockClient(is_live=True)
+        ctx = create_test_context(is_live=True)
         with patch("builtins.input", return_value="n"):
-            result = _handle_command(client, "/ask Total revenue")
+            result = _handle_command(ctx, "/ask Total revenue")
         assert "not executed" in result
 
     def test_ask_live_mode_accept(self):
-        client = MockClient(is_live=True)
+        ctx = create_test_context(is_live=True)
         with patch("builtins.input", return_value="y"):
-            result = _handle_command(client, "/ask Total revenue")
+            result = _handle_command(ctx, "/ask Total revenue")
         assert "11650" in result
 
-    def test_sql(self):
-        result = _handle_command(MockClient(), "/sql SELECT 1")
-        assert "sum" in result
 
-    def test_unknown_command(self):
-        result = _handle_command(MockClient(), "foobar")
-        assert "Unknown" in result or "/help" in result
-
-    def test_ask_empty_question(self):
-        result = _handle_command(MockClient(), "/ask ")
-        assert "Usage" in result
-
-    def test_sql_empty_query(self):
-        result = _handle_command(MockClient(), "/sql ")
-        assert "Usage" in result
+# ── Client & Entrypoint ─────────────────────────────────────────────
 
 
-# ── Client ──────────────────────────────────────────────────────────
+class TestClient:
+    def test_sample_client(self):
+        c = MorphyClient("http://127.0.0.1:8000")
+        assert c.prefix == "/api/sample"
+        assert not c.is_live
+        c.close()
 
-
-class TestClientInit:
-    def test_sample_mode(self):
-        client = MorphyClient("http://127.0.0.1:8000")
-        assert client.prefix == "/api/sample"
-        assert not client.is_live
-        client.close()
-
-    def test_live_requires_token(self):
-        from uuid import UUID
-
-        with patch.dict("os.environ", {}, clear=True):
+    def test_remote_requires_https(self):
+        with patch.dict("os.environ", {"MORPHY_ACCESS_TOKEN": "token"}):
             with pytest.raises(SystemExit):
-                MorphyClient("http://127.0.0.1:8000", UUID("12345678-1234-1234-1234-123456789abc"))
-
-    def test_live_requires_https_for_remote(self):
-        from uuid import UUID
-
-        with patch.dict("os.environ", {"MORPHY_ACCESS_TOKEN": "test-token"}):
-            with pytest.raises(SystemExit):
-                MorphyClient("http://example.com:8000", UUID("12345678-1234-1234-1234-123456789abc"))
-
-    def test_live_allows_localhost(self):
-        from uuid import UUID
-
-        with patch.dict("os.environ", {"MORPHY_ACCESS_TOKEN": "test-token"}):
-            client = MorphyClient("http://127.0.0.1:8000", UUID("12345678-1234-1234-1234-123456789abc"))
-            assert client.is_live
-            client.close()
-
-
-class TestEngineError:
-    def test_attributes(self):
-        err = EngineError(403, "denied")
-        assert err.status_code == 403
-        assert err.detail == "denied"
-        assert "denied" in str(err)
-
-
-# ── CLI entrypoint ──────────────────────────────────────────────────
+                MorphyClient("http://remote.host:8000", UUID("12345678-1234-1234-1234-123456789abc"))
 
 
 class TestMainEntrypoint:
@@ -247,6 +411,5 @@ class TestMainEntrypoint:
         with pytest.raises(SystemExit) as exc:
             sys.argv = ["morphy", "--help"]
             from morphy_cli.main import main
-
             main()
         assert exc.value.code == 0

@@ -1,6 +1,9 @@
 """Result formatting for the MORPHY terminal."""
 
+import csv
+import io
 import json
+from typing import Any, Sequence
 
 
 def format_table(columns: list[str], rows: list[list], row_count: int, elapsed_ms: float) -> str:
@@ -38,6 +41,24 @@ def format_table(columns: list[str], rows: list[list], row_count: int, elapsed_m
     return "\n".join(lines)
 
 
+def format_csv(columns: list[str], rows: list[list]) -> str:
+    """Export query results as a standard RFC-4180 CSV string."""
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow(["" if cell is None else cell for cell in row])
+    return output.getvalue()
+
+
+def format_records_table(headers: list[str], items: list[dict[str, Any]], keys: list[str]) -> str:
+    """Format an arbitrary list of objects as an aligned CLI table."""
+    if not items:
+        return "(none)"
+    rows = [[str(item.get(k, "")) for k in keys] for item in items]
+    return format_table(headers, rows, len(items), 0.0).split("\n\n")[0]
+
+
 def format_schema(tables: dict) -> str:
     """Format schema metadata as an indented tree."""
     if not tables:
@@ -45,8 +66,12 @@ def format_schema(tables: dict) -> str:
     lines = []
     for table, columns in tables.items():
         lines.append(f"  {table}")
-        for col, dtype in columns.items():
-            lines.append(f"    {col}: {dtype}")
+        if isinstance(columns, dict):
+            for col, dtype in columns.items():
+                lines.append(f"    {col}: {dtype}")
+        elif isinstance(columns, list):
+            for col in columns:
+                lines.append(f"    {col}")
     return "\n".join(lines)
 
 
@@ -73,6 +98,6 @@ def format_generation(gen: dict) -> str:
     return "\n".join(lines)
 
 
-def format_json(data) -> str:
+def format_json(data: Any) -> str:
     """Pretty-print arbitrary data as JSON."""
     return json.dumps(data, indent=2, default=str)

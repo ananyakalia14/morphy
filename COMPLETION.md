@@ -23,7 +23,7 @@
 - Saved/shared queries, dashboards and the full viewer-only experience.
 - Frontier-provider benchmark mode and opt-in egress controls.
 - Academic Spider/BIRD dataset evaluation and performance measurements.
-- Full-screen production database connection wizard and interactive terminal autocomplete.
+- Full-screen production database connection wizard (interactive terminal autocomplete implemented in CLI).
 - Profile editing after onboarding and invitation revocation.
 - Production packaging, deployment, key rotation, operational monitoring and recovery validation.
 
