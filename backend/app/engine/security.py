@@ -4,6 +4,7 @@ from urllib.parse import urlsplit, parse_qs
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlglot import exp, parse
 from sqlglot.optimizer.qualify import qualify
+from sqlglot.optimizer.scope import traverse_scope
 
 FUNCTIONS = {
     "sum",
@@ -56,6 +57,20 @@ def check_uri(uri, allowed_hosts):
         raise ValueError("Use sslmode=require, verify-full or disable.")
 
 
+def physical_tables(tree):
+    tables = {}
+    scopes = list(traverse_scope(tree))
+    if len(scopes) > 32:
+        raise ValueError("Use at most 32 query scopes.")
+    for scope in scopes:
+        if not isinstance(scope.expression, (exp.Select, exp.SetOperation)):
+            raise ValueError("Unsupported query source.")
+        for source in scope.sources.values():
+            if isinstance(source, exp.Table):
+                tables[id(source)] = source
+    return list(tables.values())
+
+
 def compile_query(sql, schema, policy, dialect="postgres"):
     if policy.get("mode") not in {"QUERY_ONLY", "SCHEMA_EDIT"}:
         raise PermissionError("Your current role cannot execute queries.")
@@ -67,35 +82,40 @@ def compile_query(sql, schema, policy, dialect="postgres"):
             }
     allowed = {t: cols for t, cols in allowed.items() if cols}
     statements = parse(sql, read=dialect)
-    if len(statements) != 1 or not isinstance(statements[0], exp.Select):
-        raise ValueError("Submit exactly one SELECT statement.")
+    if len(statements) != 1 or not isinstance(
+        statements[0], (exp.Select, exp.SetOperation)
+    ):
+        raise ValueError("Submit exactly one read query.")
     tree = statements[0]
-    if (
-        tree.args.get("with_")
-        or tree.args.get("locks")
-        or any(
-            tree.find_all(
-                exp.Subquery, exp.Union, exp.Intersect, exp.Except, exp.Into, exp.Dot
-            )
+    if any(with_.args.get("recursive") for with_ in tree.find_all(exp.With)) or any(
+        tree.find_all(
+            exp.DDL,
+            exp.DML,
+            exp.Command,
+            exp.Into,
+            exp.Lock,
+            exp.Dot,
+            exp.Lateral,
+            exp.TableSample,
         )
     ):
         raise ValueError(
-            "This engine version accepts flat SELECTs, joins and aggregates."
+            "Recursive queries, writes, locks and specialized table sources are unsupported."
         )
-    sources = list(tree.find_all(exp.Table))
+    sources = physical_tables(tree)
     if not sources or len(sources) > 12:
         raise ValueError("Select from one to twelve authorized tables.")
     for table in sources:
         if table.name not in allowed or table.db or table.catalog:
             raise PermissionError("The query references a table outside your policy.")
     for f in tree.find_all(exp.Func):
-        if isinstance(f, (exp.And, exp.Or)):
+        if isinstance(f, (exp.And, exp.Or, exp.Exists)):
             continue
         name = f.name if isinstance(f, exp.Anonymous) else f.sql_name()
         if name.lower() not in FUNCTIONS:
             raise ValueError("The query uses an unsupported function.")
     tree = qualify(tree, dialect=dialect, schema=allowed, validate_qualify_columns=True)
-    for table in list(tree.find_all(exp.Table)):
+    for table in physical_tables(tree):
         name, alias = table.name, table.alias_or_name
         source = exp.select(*[exp.column(c, quoted=True) for c in allowed[name]])
         source = source.from_(

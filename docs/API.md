@@ -26,7 +26,7 @@ The query response uses parallel columns and rows arrays. Preserve null values. 
 
 ## Limits and behavior
 
-PostgreSQL v1 supports public base tables with built-in scalar types, flat SELECTs, joins and aggregates with an approved function list. CTEs, nested queries, sets, writes and unsafe functions are rejected.
+PostgreSQL v1 supports public base tables with built-in scalar types, SELECTs, joins, aggregates, non-recursive CTEs, nested/correlated queries and UNION/INTERSECT/EXCEPT with an approved function list. Each physical source is filtered inside its own scope. Writes, recursive CTEs, locks and specialized table sources are rejected. Queries are bounded to 32 scopes and 12 physical source references.
 
 CSV imports are registered as SQLite sources. Their single table is records and all input columns are TEXT. Invalid replacements leave prior data intact. Empty CSV fields become null. Imports support at most 64 uniquely named columns, 20,000 records and 16 KB per field.
 

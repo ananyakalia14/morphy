@@ -11,7 +11,8 @@ from sqlglot import exp, parse
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.errors import SqlglotError
 
-from .security import compile_query
+from .security import compile_query, physical_tables
+from sqlglot.optimizer.scope import traverse_scope
 from .retrieval import semantic_anchors
 
 VOCABULARY = {
@@ -103,25 +104,41 @@ class Glossary:
 
     def restore(self, candidate):
         statements = parse(candidate, read="postgres")
-        if len(statements) != 1 or not isinstance(statements[0], exp.Select):
-            raise ValueError("Expected one SELECT")
+        if len(statements) != 1 or not isinstance(
+            statements[0], (exp.Select, exp.SetOperation)
+        ):
+            raise ValueError("Expected one read query")
         tree = qualify(statements[0], dialect="postgres", schema=self.schema)
         names = {masked: original for original, masked in self.tables.items()}
-        sources = {}
-        for table in tree.find_all(exp.Table):
+        physical = physical_tables(tree)
+        restored_columns = set()
+        # Resolve columns before renaming tables so each nested alias has its
+        # own scope. CTE output names retain their projected aliases.
+        for scope in traverse_scope(tree):
+            for column in scope.columns:
+                if id(column) in restored_columns:
+                    continue
+                if not column.table:
+                    continue
+                owner = scope
+                while owner is not None and column.table not in owner.sources:
+                    owner = owner.parent
+                source = owner.sources.get(column.table) if owner else None
+                if isinstance(source, exp.Table):
+                    original_table = names.get(source.name)
+                    if not original_table:
+                        raise ValueError("Unknown table alias")
+                    columns = {v: k for k, v in self.columns[original_table].items()}
+                    original_column = columns.get(column.name)
+                    if not original_column:
+                        raise ValueError("Unknown column alias")
+                    column.set("this", exp.to_identifier(original_column, quoted=True))
+                    restored_columns.add(id(column))
+        for table in physical:
             original = names.get(table.name)
             if not original or table.db or table.catalog:
                 raise ValueError("Unknown table alias")
-            sources[table.alias_or_name] = {
-                v: k for k, v in self.columns[original].items()
-            }
             table.set("this", exp.to_identifier(original, quoted=True))
-        for column in tree.find_all(exp.Column):
-            if column.table:
-                original = sources.get(column.table, {}).get(column.name)
-                if not original:
-                    raise ValueError("Unknown column alias")
-                column.set("this", exp.to_identifier(original, quoted=True))
         return tree.sql(dialect="postgres")
 
 
@@ -143,7 +160,7 @@ async def draft(config, question, reflected, policy, edges, validate_plan=None):
     messages = [
         {
             "role": "system",
-            "content": "Return JSON with one sql string containing a flat PostgreSQL SELECT. Use the exact identifiers listed here. Use authorized joins and aggregates. Give result columns readable aliases. No CTEs, nested queries or writes. Schema: "
+            "content": "Return JSON with one sql string containing a PostgreSQL read query. Use the exact identifiers listed here. Use authorized joins and aggregates. Give result columns readable aliases. Non-recursive CTEs, nested queries and UNION are supported. No writes, locks or recursive CTEs. Schema: "
             + guide,
         },
         {"role": "user", "content": question},
