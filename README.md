@@ -39,6 +39,7 @@ Supabase account and Storage journeys await full local verification because Dock
 ## Integration guides
 
 - [Engine API contract](docs/API.md)
+- [Execution evaluation guide](docs/EVALUATION.md)
 - [Antigravity CLI brief and checklist](cli/README.md)
 - [Lovable website brief and checklist](frontend/README.md)
 - [Repository workflow](CONTRIBUTING.md)

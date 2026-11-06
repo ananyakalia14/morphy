@@ -1,0 +1,44 @@
+{
+  "evaluation": "MORPHY local execution agreement",
+  "model": "qwen2.5-coder:7b",
+  "selected": 3,
+  "scored": 3,
+  "counts": {
+    "correct": 3
+  },
+  "agreement": 1.0,
+  "comparison": "Exact cell values and column order. Row order is significant when the reference has a top-level ORDER BY. Otherwise compare row multisets.",
+  "limits": "Production SQL policy subset and 1000-row cap apply. This is a local diagnostic, not the official Spider/BIRD scoring protocol.",
+  "cases": [
+    {
+      "db_id": "shop",
+      "question": "How many orders are there? Return one count.",
+      "status": "correct",
+      "sql": "SELECT COUNT(\"order_2be0b998b0\".\"id\") AS \"total_orders\" FROM \"orders\" AS \"order_2be0b998b0\"",
+      "attempts": 1,
+      "expected_rows": 1,
+      "actual_rows": 1,
+      "elapsed_ms": 2736.7
+    },
+    {
+      "db_id": "shop",
+      "question": "What is the total amount of all orders? Return one sum.",
+      "status": "correct",
+      "sql": "SELECT SUM(\"order_2be0b998b0\".\"amount\") AS \"total_amount\" FROM \"orders\" AS \"order_2be0b998b0\"",
+      "attempts": 1,
+      "expected_rows": 1,
+      "actual_rows": 1,
+      "elapsed_ms": 2472.11
+    },
+    {
+      "db_id": "shop",
+      "question": "What is the total amount for each product? Return product and total amount.",
+      "status": "correct",
+      "sql": "SELECT \"order_2be0b998b0\".\"product\" AS \"product\", SUM(\"order_2be0b998b0\".\"amount\") AS \"total_amount\" FROM \"orders\" AS \"order_2be0b998b0\" GROUP BY \"order_2be0b998b0\".\"product\"",
+      "attempts": 1,
+      "expected_rows": 2,
+      "actual_rows": 2,
+      "elapsed_ms": 3557.81
+    }
+  ]
+}
