@@ -7,6 +7,7 @@
 - PostgreSQL connections and encrypted CSV imports with read-only execution.
 - Non-recursive CTEs, nested SELECTs, correlated EXISTS and UNION/INTERSECT/EXCEPT with source-level policy filtering.
 - Real local Qwen inference, semantic pseudonyms, AST restoration and bounded correction.
+- Local Spider/BIRD-style execution-agreement runner with read-only SQLite and explicit error/exclusion counts.
 - Offline MiniLM anchors and authorized foreign-key graph expansion.
 - SQL/result inspection, session history, activity viewer and live-query CLI.
 - Combined local startup script, stable encryption key and repeatable migrations.
@@ -22,7 +23,7 @@
 - Redis HNSW semantic SQL cache, Cuckoo-filter username acceleration and Redis Streams audit worker.
 - Saved/shared queries, dashboards and the full viewer-only experience.
 - Frontier-provider benchmark mode and opt-in egress controls.
-- Academic Spider/BIRD dataset evaluation and performance measurements.
+- Official Spider/BIRD dataset runs, official scoring and representative performance measurements.
 - Full-screen production database connection wizard and interactive terminal autocomplete.
 - Profile editing after onboarding and invitation revocation.
 - Production packaging, deployment, key rotation, operational monitoring and recovery validation.
