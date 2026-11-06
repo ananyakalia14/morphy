@@ -113,6 +113,14 @@ def test_live_postgres_round_trip(monkeypatch):
             response = client.post(path+"/query", json={"sql": "SELECT SUM(amount) AS total FROM orders WHERE 1=1 OR amount=999"})
             assert response.status_code == 200, response.text
             assert float(response.json()["rows"][0][0]) == 20
+            for sql in [
+                "WITH orders AS (SELECT amount FROM orders) SELECT SUM(amount) FROM orders",
+                "SELECT SUM(amount) FROM (SELECT amount FROM orders WHERE region='EU' OR 1=1) x",
+                "SELECT SUM(amount) FROM orders UNION SELECT SUM(amount) FROM orders",
+            ]:
+                scoped = client.post(path+"/query",json={"sql":sql})
+                assert scoped.status_code == 200, scoped.text
+                assert float(scoped.json()["rows"][0][0]) == 20
             if os.getenv("MORPHY_TEST_OLLAMA") == "1":
                 generated = client.post(path+"/generate", json={"question":"What is the sum of all order amounts? Return one total."})
                 assert generated.status_code == 200, generated.text

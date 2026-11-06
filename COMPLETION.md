@@ -5,6 +5,7 @@
 - Supabase schema, authenticated RPCs, organization ownership, invitations and custom roles.
 - Role and user policy intersections, table/column allowlists and equality row predicates.
 - PostgreSQL connections and encrypted CSV imports with read-only execution.
+- Non-recursive CTEs, nested SELECTs, correlated EXISTS and UNION/INTERSECT/EXCEPT with source-level policy filtering.
 - Real local Qwen inference, semantic pseudonyms, AST restoration and bounded correction.
 - Offline MiniLM anchors and authorized foreign-key graph expansion.
 - SQL/result inspection, session history, activity viewer and live-query CLI.
@@ -18,7 +19,6 @@
 
 ## Original requirements still requiring implementation
 - MySQL, MariaDB, Snowflake, BigQuery, DuckDB, ClickHouse, MongoDB and Parquet connectors.
-- General CTE, nested-query and set-operation support in the policy validator.
 - Redis HNSW semantic SQL cache, Cuckoo-filter username acceleration and Redis Streams audit worker.
 - Saved/shared queries, dashboards and the full viewer-only experience.
 - Frontier-provider benchmark mode and opt-in egress controls.
@@ -27,4 +27,4 @@
 - Profile editing after onboarding and invitation revocation.
 - Production packaging, deployment, key rotation, operational monitoring and recovery validation.
 
-The supported live PostgreSQL query subset is flat SELECTs, joins and aggregates using a limited function set and public base tables. CSV import creates a records table with TEXT fields. The graph retriever uses authorized foreign keys and bounded anchors. Benchmark leaderboard and latency targets remain unmeasured.
+The supported live PostgreSQL query subset is SELECTs, joins, aggregates, non-recursive CTEs, nested queries and set operations using a limited function set and public base tables. CSV import creates a records table with TEXT fields. The graph retriever uses authorized foreign keys and bounded anchors. Benchmark leaderboard and latency targets remain unmeasured.

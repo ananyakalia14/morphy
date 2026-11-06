@@ -38,3 +38,7 @@ The free-question browser test passed through real Qwen, restored SQL and govern
 Offline MiniLM loaded from existing weights and selected payments for “How much money was paid?” across a schema with unrelated tables.
 Redis cache scoping has a regression test. Actual Redis-server calls remain unverified.
 The web production build passed after the latest engine and import UI changes.
+
+
+## Scoped SELECT engine update
+Source-level filtering passed for CTEs shadowing table names, nested SELECTs, correlated EXISTS and UNION/INTERSECT/EXCEPT. Hidden columns, denied set-operation branches, mutating CTEs and recursion were rejected. Pseudonym restoration covers reused and correlated aliases. The live PostgreSQL/Qwen run passed 25 tests. The final unit run passed 25 tests and skipped the service-dependent integration.
