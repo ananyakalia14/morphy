@@ -82,7 +82,7 @@ class QuestionInput(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
 
-async def authorized_target(database_id, user, config):
+async def authorized_target(database_id, user, config, *, viewing_panel=False):
     conn = await control(config)
     try:
         async with conn.transaction():
@@ -93,7 +93,10 @@ async def authorized_target(database_id, user, config):
                 "SELECT public.effective_permission($1)", database_id
             )
             policy = json.loads(raw) if isinstance(raw, str) else raw
-            if not policy or policy.get("mode") not in {"QUERY_ONLY", "SCHEMA_EDIT"}:
+            permitted_modes = {"QUERY_ONLY", "SCHEMA_EDIT"}
+            if viewing_panel:
+                permitted_modes.add("VIEW_ONLY")
+            if not policy or policy.get("mode") not in permitted_modes:
                 raise HTTPException(
                     403, "Your current database policy does not allow queries."
                 )
@@ -236,19 +239,66 @@ async def query(
     user=Depends(identity),
     config=Depends(settings),
 ):
-    uri, policy, org, kind = await authorized_target(database_id, user, config)
+    target = await authorized_target(database_id, user, config)
+    return await execute_sql(database_id, user, config, target, payload.sql)
+
+
+@router.post("/dashboards/{dashboard_id}/panels/{query_id}/render")
+async def render_panel(
+    dashboard_id: uuid.UUID,
+    query_id: uuid.UUID,
+    user=Depends(identity),
+    config=Depends(settings),
+):
+    conn = await control(config)
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('request.jwt.claim.sub',$1,true)", str(user)
+            )
+            # Both the panel and its underlying saved definition must be visible
+            # under the caller's RLS context. SQL comes exclusively from storage.
+            await conn.execute("SET LOCAL ROLE authenticated")
+            panel = await conn.fetchrow(
+                """
+                SELECT p.database_id,q.sql_text FROM public.dashboard_panels p
+                JOIN public.saved_queries q ON q.id=p.query_id
+                WHERE p.dashboard_id=$1 AND p.query_id=$2
+            """,
+                dashboard_id,
+                query_id,
+            )
+    finally:
+        await conn.close()
+    if not panel:
+        raise HTTPException(404, "Panel unavailable.")
+    database_id = panel["database_id"]
+    uri, policy, org, kind = await authorized_target(
+        database_id, user, config, viewing_panel=True
+    )
+    # Authorize this stored statement only. Preserve the viewer's entire
+    # column map and all row predicates when compiling the panel.
+    if policy["mode"] == "VIEW_ONLY":
+        policy = {**policy, "mode": "QUERY_ONLY"}
+    return await execute_sql(
+        database_id, user, config, (uri, policy, org, kind), panel["sql_text"]
+    )
+
+
+async def execute_sql(database_id, user, config, target_info, submitted_sql):
+    uri, policy, org, kind = target_info
     started = time.perf_counter()
     try:
         if kind == "csv-v1":
             await audit_query(config, org, user, database_id)
-            result = await run_in_threadpool(execute_csv, uri, policy, payload.sql)
+            result = await run_in_threadpool(execute_csv, uri, policy, submitted_sql)
             return {
                 **result,
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
             }
         async with connection(uri) as target:
             reflected = await reflect(target)
-            sql = compile_query(payload.sql, reflected, policy)
+            sql = compile_query(submitted_sql, reflected, policy)
             # Fail closed if the durable query-intent audit cannot be written.
             await audit_query(config, org, user, database_id)
             # Bound response memory as well as row count.
