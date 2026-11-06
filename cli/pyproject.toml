@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "morphy-cli"
-version = "0.4.0"
+version = "0.5.0"
 description = "MORPHY governed query terminal"
 requires-python = ">=3.11"
-dependencies = ["httpx>=0.27,<1"]
+dependencies = ["httpx>=0.27,<1", "prompt-toolkit>=3.0,<4"]
 
 [project.scripts]
 morphy = "morphy_cli.main:main"
