@@ -1,4 +1,5 @@
 begin;
+set local search_path = pg_catalog, public, extensions;
 create extension if not exists pg_trgm with schema extensions;
 create schema if not exists morphy_private;
 revoke all on schema morphy_private from public, anon, authenticated;

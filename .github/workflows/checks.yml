@@ -36,3 +36,26 @@ jobs:
       - run: morphy --help
       - run: python -m compileall -q cli/morphy_cli backend/app
 
+  sql-policies:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - "127.0.0.1:55422:5432"
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "55422"
+      PGUSER: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations and verify authenticated policies
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -f tests/postgres-fixture.sql
+          for migration in migrations/*.sql; do psql -X -v ON_ERROR_STOP=1 -f "$migration"; done
+          psql -X -v ON_ERROR_STOP=1 -f tests/control-plane.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/saved-queries.sql
