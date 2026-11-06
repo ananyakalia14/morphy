@@ -11,6 +11,7 @@ try {
   New-Item -ItemType Directory -Path supabase/migrations -Force | Out-Null
   Copy-Item migrations/001_supabase_control_plane.sql supabase/migrations/00000000000001_control_plane.sql -Force
   Copy-Item migrations/002_live_engine.sql supabase/migrations/00000000000002_live_engine.sql -Force
+  Copy-Item migrations/003_saved_queries.sql supabase/migrations/00000000000003_saved_queries.sql -Force
   Invoke-LocalCli start -x studio,realtime,edge-runtime,logflare,vector,supavisor,imgproxy,postgres-meta | Out-Null
   Invoke-LocalCli migration up --local
   # Forward only browser-safe values. Supabase status also contains admin secrets.
