@@ -71,3 +71,21 @@ Sample data is independent of organization authorization and must be labeled whe
 ## Dashboard panels
 
 POST /engine/dashboards/{dashboard_id}/panels/{query_id}/render executes the visible stored query under the caller’s current data policy. VIEW_ONLY is supported for this saved-panel action. See [DASHBOARDS.md](DASHBOARDS.md) for definition CRUD, visibility and panel ordering.
+
+## Profile editing and invitation withdrawal
+
+
+Apply migration 005. Call these Supabase RPCs with the signed-in session:
+
+
+- `update_profile({full_name, avatar})` edits only the caller's existing display name and avatar path. Send the current avatar path to keep it, or null to clear it. Upload WebP to the caller's existing `<user-id>/profile.webp` Storage path first. Clearing the reference does not delete the stored object. Names must contain 1–80 characters after trimming. Global username and account id remain unchanged. Refresh the caller's `profiles` record after success.
+
+- `revoke_invitation({inv})` withdraws a pending invitation for an organization administrator. Revoking an already revoked invite is a no-op. Accepted invitations cannot be revoked; this action never removes a member. Recipient and administrator can read the `revoked` status through the existing invitation policy.
+
+- `invite_person({o, person, r})` can reissue a revoked invite. Reissue creates a new invitation id, preserves the single row per organization/recipient, and records the current inviter, role and timestamp. Clients must refresh invitation ids; an old id cannot accept a reissued invitation. Updating a pending invitation keeps its id.
+
+- `accept_invitation({inv})` requires the matching account and pending status. Acceptance of an already accepted id by its recipient remains idempotent. Acceptance, withdrawal and reissue serialize per organization, so a simultaneous accept/revoke has exactly one winner.
+
+
+Direct profile and invitation writes remain disallowed. Invitation actions write audit events. Profile editing does not alter database permissions. Frontend and CLI account/settings screens must call these RPCs; no new engine HTTP endpoints are required.
+

@@ -69,5 +69,5 @@ jobs:
           MORPHY_INTEGRATION_DSN: postgresql://postgres@127.0.0.1:55422/postgres
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
           MORPHY_EMBEDDINGS: "off"
-        run: python -m pytest tests/test_live_engine.py -q
+        run: python -m pytest tests/test_live_engine.py tests/test_account_lifecycle.py -q
         working-directory: backend
