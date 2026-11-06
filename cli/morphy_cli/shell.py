@@ -17,6 +17,7 @@ from .client import EngineError, MorphyClient
 from .completer import SlashCompleter
 from .control import ControlClient, ControlPlaneError
 from .formatting import (
+    format_banner,
     format_csv,
     format_examples,
     format_generation,
@@ -410,13 +411,16 @@ def run_repl(client: MorphyClient, auth_manager: Optional[AuthManager] = None):
     client.set_token_source(lambda: auth.get_valid_token())
 
     ctx = ShellContext(client, auth)
+    auth_status = auth.status()
 
-    banner_parts = ["MORPHY governed query terminal", "Type /help for available commands.\n"]
-    if client.is_live:
-        banner_parts.insert(1, f"Connected to database: {client.database}")
-    else:
-        banner_parts.insert(1, "Workspace: SAMPLE (synthetic commerce dataset · APAC policy)")
-    print("\n".join(banner_parts))
+    banner = format_banner(
+        version="0.5.0",
+        engine_url=client.base_url,
+        database=client.database,
+        user_email=auth_status.get("email"),
+        org_name=ctx.active_org_name,
+    )
+    print(banner)
 
     bindings = KeyBindings()
 

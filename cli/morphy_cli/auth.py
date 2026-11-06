@@ -318,3 +318,4 @@ class AuthManager:
             "expires_in_seconds": remaining_sec,
             "supabase_url": self.supabase_url,
         }
+

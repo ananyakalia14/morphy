@@ -144,3 +144,4 @@ class ControlClient:
             "/rest/v1/rpc/find_people",
             json_body={"prefix": prefix.strip().lower()},
         ) or []
+

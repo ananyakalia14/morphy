@@ -101,3 +101,43 @@ def format_generation(gen: dict) -> str:
 def format_json(data: Any) -> str:
     """Pretty-print arbitrary data as JSON."""
     return json.dumps(data, indent=2, default=str)
+
+
+def format_banner(
+    *,
+    version: str = "0.5.0",
+    engine_url: str = "http://127.0.0.1:8000",
+    database: Any = None,
+    user_email: Any = None,
+    org_name: Any = None,
+) -> str:
+    """Render the stylish Claude-Code-inspired ASCII brand banner."""
+    ORANGE = "\033[38;5;208m"
+    DIM = "\033[90m"
+    BOLD = "\033[1m"
+    GREEN = "\033[92m"
+    RESET = "\033[0m"
+    WHITE = "\033[97m"
+    CYAN = "\033[96m"
+
+    logo = f"""
+{ORANGE}{BOLD}  ███╗   ███╗ ██████╗ ██████╗ ██████╗ ██╗  ██╗██╗   ██╗
+  ████╗ ████║██╔═══██╗██╔══██╗██╔══██╗██║  ██║╚██╗ ██╔╝
+  ██╔████╔██║██║   ██║██████╔╝██████╔╝███████║ ╚████╔╝ 
+  ██║╚██╔╝██║██║   ██║██╔══██╗██╔═══╝ ██╔══██║  ╚██╔╝  
+  ██║ ╚═╝ ██║╚██████╔╝██║  ██║██║     ██║  ██║   ██║   
+  ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝   ╚═╝   {RESET}
+  {DIM}Governed Natural-Language Database Terminal{RESET}  {CYAN}v{version}{RESET}"""
+
+    lines = [logo]
+    if database:
+        db_label = f"{org_name}/{database}" if org_name else str(database)
+        lines.append(f"  {GREEN}●{RESET} Database:  {WHITE}{BOLD}{db_label}{RESET} {DIM}(live query mode){RESET}")
+        if user_email:
+            lines.append(f"  {GREEN}●{RESET} User:      {WHITE}{BOLD}{user_email}{RESET}")
+    else:
+        lines.append(f"  {GREEN}●{RESET} Workspace: {WHITE}{BOLD}SAMPLE{RESET} {DIM}(synthetic commerce · APAC policy){RESET}")
+
+    lines.append(f"  {GREEN}●{RESET} Engine:    {WHITE}{BOLD}{engine_url}{RESET}")
+    lines.append(f"\n  {DIM}Type {CYAN}/help{DIM} for commands · {CYAN}Tab{DIM} to autocomplete · {CYAN}Ctrl+C{DIM} to clear · {CYAN}Ctrl+D{DIM} to exit{RESET}\n")
+    return "\n".join(lines)

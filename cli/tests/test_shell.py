@@ -16,6 +16,7 @@ from morphy_cli.client import EngineError, MorphyClient
 from morphy_cli.completer import SlashCompleter
 from morphy_cli.control import ControlClient, ControlPlaneError
 from morphy_cli.formatting import (
+    format_banner,
     format_csv,
     format_examples,
     format_generation,
@@ -121,6 +122,27 @@ class TestFormatJSON:
     def test_json_dump(self):
         data = {"hello": "world", "num": 42}
         assert '"hello": "world"' in format_json(data)
+
+
+class TestFormatBanner:
+    def test_sample_banner(self):
+        banner = format_banner(version="0.5.0", engine_url="http://127.0.0.1:8000")
+        assert "███" in banner
+        assert "v0.5.0" in banner
+        assert "SAMPLE" in banner
+        assert "http://127.0.0.1:8000" in banner
+
+    def test_live_banner(self):
+        banner = format_banner(
+            version="0.5.0",
+            engine_url="http://127.0.0.1:8000",
+            database="analytics-db",
+            user_email="user@example.com",
+            org_name="Acme",
+        )
+        assert "Acme/analytics-db" in banner
+        assert "user@example.com" in banner
+        assert "live query mode" in banner
 
 
 # ── Completer ───────────────────────────────────────────────────────
