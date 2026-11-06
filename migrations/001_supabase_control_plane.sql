@@ -12,7 +12,7 @@ create table public.profiles (
   created_at timestamptz not null default now()
 );
 create unique index profiles_handle on public.profiles(lower(username));
-create index profiles_typeahead on public.profiles using gin(username extensions.gin_trgm_ops);
+create index profiles_typeahead on public.profiles using gin(username gin_trgm_ops);
 create table public.organizations (
   id uuid primary key default gen_random_uuid(),
   name text not null check(length(trim(name)) between 1 and 80),
@@ -243,4 +243,3 @@ revoke all on all functions in schema morphy_private from public, anon, authenti
 grant usage on schema morphy_private to authenticated;
 grant execute on function morphy_private.member(uuid),morphy_private.admin(uuid) to authenticated;
 commit;
-
