@@ -50,3 +50,6 @@ The backend unit run passed 30 tests with one service-dependent integration skip
 
 ## Dashboard panel verification
 The local PostgreSQL fixture run passed 31 tests, including saved-panel rendering for a VIEW_ONLY user whose row policy differs from the author’s. Request-supplied SQL was ignored, arbitrary query execution stayed denied, a wrong dashboard ID returned 404 and unsharing the saved query removed panel visibility. The first optional model-inclusive run failed because Ollama was offline; the database/API run passed after separating inference from this integration.
+
+
+Account lifecycle: migration 005 adds caller-only profile editing and admin invitation withdrawal/reissue. A disposable PostgreSQL test checks invalid avatar ownership, invalid names, caller isolation, unauthorized withdrawal, idempotency, stale invitation ids, wrong-account acceptance and simultaneous acceptance/withdrawal. Supabase Auth/Storage UI verification remains open.

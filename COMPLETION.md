@@ -3,6 +3,7 @@
 ## Working and tested
 - Private and organization-shared saved SQL definitions with current database permissions and revision-checked client edits.
 - Dashboard definitions, panel references and viewer-policy result rendering.
+- Profile-editing and invitation withdrawal/reissue RPCs, including concurrent accept/revoke checks.
 - Neo-brutalist web frontend and six-animal animation package.
 - Supabase schema, authenticated RPCs, organization ownership, invitations and custom roles.
 - Role and user policy intersections, table/column allowlists and equality row predicates.
@@ -27,7 +28,7 @@
 - Frontier-provider benchmark mode and opt-in egress controls.
 - Official Spider/BIRD dataset runs, official scoring and representative performance measurements.
 - Full-screen production database connection wizard and interactive terminal autocomplete.
-- Profile editing after onboarding and invitation revocation.
+- Website/terminal settings for profile editing and invitation withdrawal/reissue.
 - Production packaging, deployment, key rotation, operational monitoring and recovery validation.
 
 The supported live PostgreSQL query subset is SELECTs, joins, aggregates, non-recursive CTEs, nested queries and set operations using a limited function set and public base tables. CSV import creates a records table with TEXT fields. The graph retriever uses authorized foreign keys and bounded anchors. Benchmark leaderboard and latency targets remain unmeasured.
