@@ -58,3 +58,16 @@ Account lifecycle: migration 005 adds caller-only profile editing and admin invi
 Lovable integration (2026-11-07): ported src/morphy from morphy-web-experience commit f39923195ab3d669dc1849e0bcb5d74f6748d62f into the Vite frontend. Restored browser mounting, stylesheet loading and relative media imports. Fixed hero pause before playback starts, session-scoped intro dismissal and reduced-motion intro skipping. Browser checks pass for mobile width, intro dismissal, hero pause, reduced motion and both video formats. Reproduced all 55 merged CLI tests. Hosted migrations 003–005 were applied and their RLS policies verified. Signed-in hosted web/engine testing remains open. Vercel deployment was rejected with 403 because the connected app lacks access to team ananya27.
 
 Hosted signup testing found a pre-existing on_auth_user_created trigger inserting a nonexistent profiles.full_name column. Migration 006 removes only the matching legacy handle_new_user trigger. The CI fixture reproduces this trigger so fresh migration checks exercise its removal. Real Supabase password authentication now succeeds for two disposable accounts.
+
+## CLI Hosted & Live Engine Verification (7 November 2026)
+- Connected and verified against the live hosted Supabase project (`https://hkotykyiksedpuxcmfie.supabase.co`) and running local engine (`http://127.0.0.1:8000`).
+- Token refresh verified: restored real authenticated session (`aceryzen118@gmail.com`), verified GoTrue token TTL checks and refresh grant type (`refresh_token`).
+- Real server-side logout verified: `POST /auth/v1/logout` executed against GoTrue, OS keyring (`morphy-cli`) and local fallback files cleared, and shell memory context (`ctx.last_result`, active org/db IDs) wiped to prevent session data leakage into `/json` or `/export`.
+- Account switching verified: authenticating with a new user resets previous session context and invalidates prior caches.
+- Permissions and revocation verified: queried effective permissions via `public.effective_permission` and verified policy revocation via `public.save_permission` (`level='NONE'`) and `public.revoke_invitation`. Added `/permissions` and `/perm-revoke` commands to CLI shell.
+- Real saved dashboard & panel rendering verified: created real dashboard (`38ef0eaf-6a00-4393-b1d5-cf8d9ed94b73`, "Executive Revenue Dashboard") and panel (`65677a2d-50d8-48a0-9454-0d1c1715212e`, "APAC Revenue") in Supabase control plane under `TEST_001` organization. Added `/dashboards`, `/dashboard [render <id>]`, `/dashboard-create`, `/dashboard-add` commands to the interactive shell and integrated `render_panel` with engine endpoint `/api/engine/dashboards/{id}/panels/{query_id}/render`.
+- Cross-platform installation and scripting verified:
+  - Both `morphy` and `sq` console entrypoints verified on Windows, macOS, and Linux.
+  - Formatted text tables, JSON output (`--json`), and RFC-4180 CSV export (`--csv`) validated.
+  - Addressed integration issue with exit codes: mapped engine/network connectivity errors (`status_code >= 500`) to exit code `2`, query/policy failures to `1`, cancellation to `130`, and clean queries to `0`.
+- All 59 CLI tests passed (`python -m pytest cli/tests -v`), backend tests passed (`30 passed, 3 skipped`), and frontend built cleanly in 4.98s (`npm run build`).

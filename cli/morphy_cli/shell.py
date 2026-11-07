@@ -37,7 +37,12 @@ Available commands:
     /logout                    Sign out and remove saved session
     /status                    Display session, active org and database context
     /profile                   View, claim, or edit your user profile
-    /dashboard                 Display summary dashboard of workspace and queries
+    /dashboard                 Display summary dashboard or render a saved dashboard
+    /dashboards                List saved dashboards
+    /dashboard-create <title>  Create a saved dashboard (optional: shared)
+    /dashboard-add <d> <q>     Add saved query panel to dashboard
+    /permissions               Display effective permissions on active database
+    /perm-revoke <role|user>   Revoke permissions on active database
 
   Organization & Databases:
     /orgs                      List your organizations
@@ -422,7 +427,165 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
             return f"Saved query '{name}' deleted."
         return f"Saved query '{name}' not found."
 
-    if cmd == "/dashboard":
+    # ── Permissions & Access Policies ───────────────────────────────────
+    if cmd == "/permissions":
+        if not ctx.active_db_id:
+            return "Active database: sample (governed synthetic APAC policy)."
+        try:
+            perm = ctx.control.effective_permission(ctx.active_db_id)
+            mode = perm.get("mode", "NONE")
+            cols = perm.get("table_columns", {})
+            rules = perm.get("row_rules", [])
+            lines = [f"Effective permission on {ctx.active_db_id}:", f"Mode: {mode}"]
+            if cols:
+                lines.append("Permitted Columns:")
+                for tbl, c_list in cols.items():
+                    lines.append(f"  • {tbl}: {', '.join(c_list)}")
+            if rules:
+                lines.append("Row Rules:")
+                for r in rules:
+                    lines.append(f"  • {r.get('table')}.{r.get('column')} {r.get('op')} {r.get('value')}")
+            return "\n".join(lines)
+        except (AuthError, ControlPlaneError) as err:
+            return f"Error fetching permissions: {err}"
+
+    if cmd.startswith("/perm-revoke"):
+        parts = cmd.split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: /perm-revoke <role_id|user_id>"
+        target = parts[1].strip()
+        if not ctx.active_org_id or not ctx.active_db_id:
+            return "Select an organization and database first (/use-org and /use-db)."
+        try:
+            roles = ctx.control.list_roles(ctx.active_org_id)
+            matched_role = [
+                r for r in roles if r["id"] == target or r["name"].lower() == target.lower()
+            ]
+            if matched_role:
+                ctx.control.revoke_permission(
+                    ctx.active_org_id, ctx.active_db_id, role_id=matched_role[0]["id"]
+                )
+                return f"Revoked permission for role '{matched_role[0]['name']}' ({matched_role[0]['id']}) on database {ctx.active_db_id}."
+            else:
+                ctx.control.revoke_permission(
+                    ctx.active_org_id, ctx.active_db_id, user_id=target
+                )
+                return f"Revoked permission for user '{target}' on database {ctx.active_db_id}."
+        except (AuthError, ControlPlaneError) as err:
+            return f"Error revoking permission: {err}"
+
+    # ── Dashboards & Panels ─────────────────────────────────────────────
+    if cmd == "/dashboards":
+        try:
+            boards = ctx.control.list_dashboards(ctx.active_org_id, ctx.active_db_id)
+            if not boards:
+                return "No saved dashboards found. Create one with /dashboard-create <title>."
+            rows = []
+            for b in boards:
+                panels = b.get("dashboard_panels") or []
+                rows.append({
+                    "id": b.get("id"),
+                    "title": b.get("title"),
+                    "shared": "yes" if b.get("shared") else "no",
+                    "panels": str(len(panels)),
+                    "updated_at": (b.get("updated_at") or "")[:19],
+                })
+            return format_records_table(
+                ["ID", "Title", "Shared", "Panels", "Updated"],
+                rows,
+                ["id", "title", "shared", "panels", "updated_at"],
+            )
+        except (AuthError, ControlPlaneError) as err:
+            return f"Error listing dashboards: {err}"
+
+    if cmd.startswith("/dashboard-create"):
+        parts = cmd.split(maxsplit=2)
+        if len(parts) < 2:
+            return "Usage: /dashboard-create <title> [shared]"
+        title = parts[1].strip()
+        shared = False
+        if len(parts) > 2 and parts[2].strip().lower() in ("true", "1", "yes", "shared"):
+            shared = True
+        if not ctx.active_org_id or not ctx.active_db_id:
+            return "Select an organization and database first (/use-org and /use-db)."
+        try:
+            dash_id = ctx.control.create_dashboard(
+                ctx.active_org_id, ctx.active_db_id, title, shared=shared
+            )
+            return f"Dashboard '{title}' created successfully ({dash_id})."
+        except (AuthError, ControlPlaneError) as err:
+            return f"Error creating dashboard: {err}"
+
+    if cmd.startswith("/dashboard-add"):
+        parts = cmd.split()
+        if len(parts) < 3:
+            return "Usage: /dashboard-add <dashboard_id> <query_id> [position]"
+        d_id = parts[1].strip()
+        q_id = parts[2].strip()
+        pos = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+        if not ctx.active_db_id:
+            return "Select a database first (/use-db)."
+        try:
+            ctx.control.add_dashboard_panel(d_id, ctx.active_db_id, q_id, position=pos)
+            return f"Panel with query {q_id} added to dashboard {d_id} at position {pos}."
+        except (AuthError, ControlPlaneError) as err:
+            return f"Error adding dashboard panel: {err}"
+
+    if cmd == "/dashboard" or cmd.startswith("/dashboard "):
+        target_board_id = None
+        parts = cmd.split(maxsplit=2)
+        if len(parts) == 2 and parts[1].strip().lower() != "render":
+            target_board_id = parts[1].strip()
+        elif len(parts) >= 3 and parts[1].strip().lower() == "render":
+            target_board_id = parts[2].strip()
+
+        # If a specific dashboard ID or title was requested, render its panels
+        if target_board_id:
+            try:
+                board = ctx.control.get_dashboard(target_board_id)
+                if not board:
+                    all_boards = ctx.control.list_dashboards(ctx.active_org_id, ctx.active_db_id)
+                    matched = [
+                        b for b in all_boards
+                        if b["id"].startswith(target_board_id)
+                        or b["title"].lower() == target_board_id.lower()
+                    ]
+                    if matched:
+                        board = matched[0]
+                if not board:
+                    return f"Dashboard '{target_board_id}' not found. Use /dashboards to list dashboards."
+
+                panels = board.get("dashboard_panels") or []
+                panels.sort(key=lambda p: (p.get("position", 0), str(p.get("query_id", ""))))
+                out = [
+                    "=" * 60,
+                    f"DASHBOARD: {board.get('title')} ({board.get('id')})",
+                    f"Shared: {'yes' if board.get('shared') else 'no'} | Panels: {len(panels)}",
+                    "=" * 60,
+                ]
+                if not panels:
+                    out.append("No panels configured on this dashboard yet.")
+                    return "\n".join(out)
+
+                for idx, panel in enumerate(panels, 1):
+                    qid = panel.get("query_id")
+                    out.append(f"\n--- Panel {idx} [Query {qid}] ---")
+                    try:
+                        res = ctx.client.render_panel(board["id"], qid)
+                        ctx.last_result = res
+                        tbl = format_table(
+                            res["columns"], res["rows"], res["row_count"], res["elapsed_ms"]
+                        )
+                        out.append(tbl)
+                    except EngineError as eng_err:
+                        out.append(f"Panel execution error: {eng_err.detail}")
+                    except Exception as exc:
+                        out.append(f"Failed to render panel: {exc}")
+                return "\n".join(out)
+            except (AuthError, ControlPlaneError) as err:
+                return f"Error retrieving dashboard: {err}"
+
+        # Otherwise display workspace overview dashboard
         auth_status = ctx.auth.status()
         user_str = auth_status.get("email") or "Unauthenticated"
         org_str = ctx.active_org_name or "(none)"
@@ -455,6 +618,7 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
             "├────────────────────────────────────────────────────────┤",
             "│  Quick actions:                                        │",
             "│    /ask <prompt>       Generate governed SQL           │",
+            "│    /dashboards         List and render dashboards      │",
             "│    /queries            List and manage saved queries   │",
             "│    /dbs                Browse organization databases   │",
             "│    /schema             Inspect table column types      │",
