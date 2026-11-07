@@ -24,6 +24,8 @@ The connection and import responses contain metadata for the administrator's set
 
 Generated SQL must be shown for review before live execution. Execution resolves permissions again. Request the query endpoint explicitly after user confirmation.
 
+For simple highest/lowest salary questions on imported sources, the engine can return a local draft with provider `morphy-template`. The draft uses only permitted identifiers and ranks finite decimal values numerically. It returns ties and skips blank or nonnumeric pay values when executed. This path sends no prompt or rows to the model.
+
 The query response uses parallel columns and rows arrays. Preserve null values. PostgreSQL numeric/date/UUID values pass through FastAPI's JSON encoding. Avoid assuming every cell is a string.
 
 ## Limits and behavior

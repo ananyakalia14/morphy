@@ -1,6 +1,11 @@
 import asyncio
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.engine import api
 from app.engine.nl2sql import Glossary, select_context, draft
 
 
@@ -57,3 +62,53 @@ def test_correction_stays_inside_masked_schema(monkeypatch):
     assert '"corp_amount"' in result["sql"]
     prompt = str(session.post.await_args.kwargs["json"]["messages"])
     assert "secret_email" not in prompt and "corp_rev" not in prompt
+
+
+def test_csv_salary_question_ranks_numbers_without_a_model(monkeypatch):
+    data = (
+        "first_name,last_name,salary,region,email\n"
+        "Amelia,Johnson,22669.84,APAC,excluded@example.test\n"
+        "Isabella,Lopez,175981.13,APAC,excluded@example.test\n"
+        "Jane,Williams,50435.05,APAC,excluded@example.test\n"
+        "Unknown,Person,not disclosed,APAC,excluded@example.test\n"
+        "Missing,Person,,APAC,excluded@example.test\n"
+        "Tied,Person,22669.840,APAC,excluded@example.test\n"
+        "Other,Region,1,EMEA,excluded@example.test"
+    )
+    policy = {
+        "mode": "QUERY_ONLY",
+        "table_columns": {"records": ["first_name", "last_name", "salary"]},
+        "row_rules": [{"table": "records", "column": "region", "op": "eq", "value": "APAC"}],
+    }
+    user, org, database = (uuid.uuid4() for _ in range(3))
+    monkeypatch.setattr(api, "authorized_target", AsyncMock(return_value=(data, policy, org, "csv-v1")))
+    model = AsyncMock(side_effect=AssertionError("Salary ranking should never call the model"))
+    monkeypatch.setattr(api, "draft", model)
+    monkeypatch.setattr(api, "audit_query", AsyncMock())
+    monkeypatch.setitem(app.dependency_overrides, api.identity, lambda: user)
+    monkeypatch.setitem(app.dependency_overrides, api.settings, lambda: SimpleNamespace())
+    endpoint = f"/api/engine/databases/{database}"
+
+    with TestClient(app) as client:
+        for question, expected in [
+            ("Who earns the lowest?", [
+                ["Amelia", "Johnson", "22669.84"], ["Tied", "Person", "22669.840"],
+            ]),
+            ("Who has the highest salary?", [["Isabella", "Lopez", "175981.13"]]),
+        ]:
+            generated = client.post(endpoint + "/generate", json={"question": question})
+            assert generated.status_code == 200, generated.text
+            draft = generated.json()
+            assert draft["provider"] == "morphy-template"
+            assert draft["requires_execution"]
+            api.audit_query.assert_not_awaited()
+            result = client.post(endpoint + "/query", json={"sql": draft["sql"]})
+            assert result.status_code == 200, result.text
+            assert result.json()["columns"] == ["first_name", "last_name", "salary"]
+            assert sorted(result.json()["rows"]) == sorted(expected)
+            api.audit_query.reset_mock()
+
+        policy["table_columns"]["records"].remove("salary")
+        denied = client.post(endpoint + "/generate", json={"question": "Who earns the lowest?"})
+        assert denied.status_code == 422
+        model.assert_not_awaited()

@@ -369,10 +369,10 @@ export function LiveEngine({
               />
             </label>
             <small id="live-question-privacy">
-              Dataset overviews use schema metadata only. SQL generation sends your question as typed to Ollama.
+              Dataset overviews use schema metadata only. Model-assisted SQL generation sends your question as typed to Ollama.
             </small>
             <button type="submit" disabled={busy || !question.trim()}>
-              {wantsOverview ? "Show dataset overview ↗" : "Generate with Ollama ↗"}
+              {wantsOverview ? "Show dataset overview ↗" : "Generate SQL ↗"}
             </button>
             {!wantsOverview && (
               <button type="button" disabled={busy} onClick={showOverview}>Show dataset overview ↗</button>
@@ -424,7 +424,9 @@ export function LiveEngine({
           )}
           {gen && (
             <p className="gen-meta" role="status">
-              {gen.cache === "hit" ? (
+              {gen.provider === "morphy-template" ? (
+                <span className="badge">Built from permitted columns</span>
+              ) : gen.cache === "hit" ? (
                 <span className="badge">Reused from cache · re-checked against your permissions</span>
               ) : (
                 <span className="badge">Freshly generated</span>
