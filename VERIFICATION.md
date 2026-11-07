@@ -56,3 +56,5 @@ Account lifecycle: migration 005 adds caller-only profile editing and admin invi
 
 
 Lovable integration (2026-11-07): ported src/morphy from morphy-web-experience commit f39923195ab3d669dc1849e0bcb5d74f6748d62f into the Vite frontend. Restored browser mounting, stylesheet loading and relative media imports. Fixed hero pause before playback starts, session-scoped intro dismissal and reduced-motion intro skipping. Browser checks pass for mobile width, intro dismissal, hero pause, reduced motion and both video formats. Reproduced all 55 merged CLI tests. Hosted migrations 003–005 were applied and their RLS policies verified. Signed-in hosted web/engine testing remains open. Vercel deployment was rejected with 403 because the connected app lacks access to team ananya27.
+
+Hosted signup testing found a pre-existing on_auth_user_created trigger inserting a nonexistent profiles.full_name column. Migration 006 removes only the matching legacy handle_new_user trigger. The CI fixture reproduces this trigger so fresh migration checks exercise its removal. Real Supabase password authentication now succeeds for two disposable accounts.
