@@ -1,5 +1,7 @@
+import { ConnectWizard } from "./ConnectWizard";
 import { Activity } from "./Activity";
 import { LiveEngine } from "./LiveEngine";
+import { SavedQueries, Dashboards } from "./Library";
 import { useCallback, useEffect, useState } from "react";
 import {
   rpc,
@@ -361,7 +363,7 @@ function PolicyEditor({
           type="button"
           disabled={!options.length}
           onClick={() =>
-            setRules([...rules, { ...options[0], op: "eq", value: "" }])
+            setRules([...rules, { ...options[0]!, op: "eq", value: "" } as Rule])
           }
         >
           + Condition
@@ -393,10 +395,9 @@ export function Workspace({
     [loadError, setLoadError] = useState(""),
     [tab, setTab] = useState("People"),
     [roleName, setRoleName] = useState(""),
-    [dbName, setDbName] = useState(""),
-    [dialect, setDialect] = useState("postgres"),
     [transfer, setTransfer] = useState(""),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    [opened, setOpened] = useState<{ database: string; sql: string }>();
   const { busy, error, run } = useAction();
   const reload = useCallback(async () => {
     const [people, roles, invites, sources, policies] = await Promise.all([
@@ -446,8 +447,8 @@ export function Workspace({
       </div>
       <div className="tabs">
         {(admin
-          ? ["People", "Query engine", "Roles & access", "Activity"]
-          : ["People", "Query engine"]
+          ? ["People", "Query engine", "Saved queries", "Dashboards", "Roles & access", "Activity"]
+          : ["People", "Query engine", "Saved queries", "Dashboards"]
         ).map((n) => (
           <button
             key={n}
@@ -469,7 +470,19 @@ export function Workspace({
       {tab === "Activity" && admin ? (
         <Activity org={org.id} key={message} />
       ) : tab === "Query engine" ? (
-        <LiveEngine org={org.id} admin={admin} />
+        <LiveEngine org={org.id} admin={admin} initial={opened} />
+      ) : tab === "Saved queries" ? (
+        <SavedQueries
+          org={org.id}
+          me={me}
+          sources={sources}
+          onOpen={(database, sql) => {
+            setOpened({ database, sql });
+            setTab("Query engine");
+          }}
+        />
+      ) : tab === "Dashboards" ? (
+        <Dashboards org={org.id} me={me} sources={sources} />
       ) : tab === "People" || !admin ? (
         <div className="columns">
           <section className="panel">
@@ -554,11 +567,37 @@ export function Workspace({
                 <div className="invites">
                   <h3>Invitations</h3>
                   {invites.map((i) => (
-                    <p key={i.id}>
-                      {people.find((p) => p.user_id === i.user_id)?.username ||
-                        "Invited teammate"}{" "}
-                      · {i.status}
-                    </p>
+                    <div className="member" key={i.id}>
+                      <span>
+                        {people.find((p) => p.user_id === i.user_id)?.username ||
+                          "Invited teammate"}{" "}
+                        · {roleFor(i.role_id)?.name} ·{" "}
+                        <b>{i.status === "revoked" ? "withdrawn" : i.status}</b>
+                      </span>
+                      {i.status === "pending" && (
+                        <button
+                          disabled={busy}
+                          onClick={() => {
+                            if (confirm("Withdraw this invitation?"))
+                              void act(() => rpc("revoke_invitation", { inv: i.id }).then(() => {}));
+                          }}
+                        >
+                          Withdraw
+                        </button>
+                      )}
+                      {i.status === "revoked" && (
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            void act(() =>
+                              rpc("invite_person", { o: org.id, person: i.user_id, r: i.role_id }).then(() => {}),
+                            )
+                          }
+                        >
+                          Reissue
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -591,48 +630,11 @@ export function Workspace({
               <button disabled={busy}>Add role</button>
             </form>
             <hr />
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void act(async () => {
-                  await rpc("register_database", {
-                    o: org.id,
-                    title: dbName,
-                    engine: dialect,
-                  });
-                  setDbName("");
-                });
-              }}
-            >
-              <label>
-                Database label
-                <input
-                  value={dbName}
-                  required
-                  maxLength={80}
-                  onChange={(e) => setDbName(e.target.value)}
-                />
-              </label>
-              <label>
-                Dialect
-                <select
-                  value={dialect}
-                  onChange={(e) => setDialect(e.target.value)}
-                >
-                  {["postgres", "sqlite"].map((d) => (
-                    <option key={d}>{d}</option>
-                  ))}
-                </select>
-              </label>
-              <small>
-                Register metadata to configure access. Live connections arrive
-                with the query engine.
-              </small>
-              <button disabled={busy}>Register database</button>
-            </form>
+            <h3>Connect a data source</h3>
+            <ConnectWizard org={org.id} onDone={() => void reload()} />
           </section>
           <section className="panel">
-            <h2>Access policy</h2>
+            <h2 id="access-policy">Access policy</h2>
             {sources.length ? (
               <PolicyEditor
                 {...{

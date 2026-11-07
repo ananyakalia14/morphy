@@ -1,68 +1,151 @@
+const ENGINE: string = import.meta.env["VITE_ENGINE_URL"] || "/api";
 import { useEffect, useState } from "react";
 import { db, rows, type Source } from "./client";
 import { AnimalMorphLoader } from "./Motion";
+import { saveQuery } from "./Library";
+import { createLatest } from "./latest";
 
-type Result = {
+export type Result = {
   columns: string[];
   rows: unknown[][];
   sql: string;
   row_count: number;
   elapsed_ms: number;
 };
-async function engine<T>(
+type Generated = {
+  sql: string;
+  provider?: string;
+  attempts?: number;
+  cache?: "hit" | "miss";
+};
+
+export const SESSION_EXPIRED = "morphy:session-expired";
+
+export async function engine<T>(
   database: string,
   path: string,
   body?: unknown,
   method = "POST",
+  fullPath?: string,
 ): Promise<T> {
   const { data } = await db!.auth.getSession();
-  if (!data.session) throw Error("Sign in again to use the query engine.");
-  const response = await fetch(
-    "/api/engine/databases/" + database + "/" + path,
-    {
-      method: body ? method : "GET",
-      headers: {
-        Authorization: "Bearer " + data.session.access_token,
-        "Content-Type": body instanceof File ? "text/csv" : "application/json",
+  if (!data.session) {
+    window.dispatchEvent(new Event(SESSION_EXPIRED));
+    throw Error("Your session expired. Sign in again.");
+  }
+  let response: Response;
+  try {
+    response = await fetch(
+      ENGINE + (fullPath || "/engine/databases/" + database + "/" + path),
+      {
+        method: body || fullPath ? method : "GET",
+        headers: {
+          Authorization: "Bearer " + data.session.access_token,
+          "Content-Type": body instanceof File ? "text/csv" : "application/json",
+        },
+        body: body instanceof File ? body : body ? JSON.stringify(body) : null,
+        signal: AbortSignal.timeout(path === "generate" ? 195000 : 75000),
       },
-      body:
-        body instanceof File ? body : body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(path === "generate" ? 195000 : 75000),
-    },
-  );
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw Error(
-      typeof result.detail === "string"
-        ? result.detail
-        : "The query engine could not complete this request.",
     );
+  } catch (e) {
+    throw Error(
+      e instanceof DOMException && e.name === "TimeoutError"
+        ? "The query engine took too long to answer. Try again."
+        : "The query engine is unavailable right now. Check that it's running and try again.",
+    );
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event(SESSION_EXPIRED));
+    const hint: Record<number, string> = {
+      401: "Your session expired. Sign in again.",
+      403: "You no longer have access to do this. Ask an administrator to check your permissions.",
+      404: "This item no longer exists or isn't shared with you.",
+      409: "This source isn't connected yet, or its setup doesn't match.",
+      413: "That file or result is too large.",
+      422: "The request couldn't be processed. Check the question or SQL and try again.",
+      502: "The database couldn't be reached.",
+      503: "The query engine is unavailable right now. Try again shortly.",
+    };
+    const detail = typeof result.detail === "string" ? result.detail : "";
+    throw Error(
+      (hint[response.status] || "The query engine could not complete this request.") +
+        (detail && response.status !== 401 ? " (" + detail + ")" : ""),
+    );
+  }
   return result;
 }
 
-export function LiveEngine({ org, admin }: { org: string; admin: boolean }) {
+export function ResultTable({ result }: { result: Result }) {
+  return (
+    <>
+      <p role="status">
+        {result.row_count} rows · {result.elapsed_ms} ms
+      </p>
+      <div className="data-scroll">
+        <table>
+          <thead>
+            <tr>
+              {result.columns.map((c, i) => (
+                <th key={i} scope="col">
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {result.rows.map((row, i) => (
+              <tr key={i}>
+                {row.map((v, j) => (
+                  <td key={j}>{v === null ? "NULL" : String(v)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+export function LiveEngine({
+  org,
+  admin,
+  initial,
+}: {
+  org: string;
+  admin: boolean;
+  initial?: { database: string; sql: string } | undefined;
+}) {
   const [sources, setSources] = useState<Source[]>([]),
     [database, setDatabase] = useState("");
   const [uri, setUri] = useState(""),
     [question, setQuestion] = useState(""),
     [sql, setSql] = useState("");
-  const [schema, setSchema] = useState<Record<string, Record<string, string>>>(
-    {},
-  );
+  const [schema, setSchema] = useState<Record<string, Record<string, string>>>({}),
+    [filter, setFilter] = useState("");
   const [result, setResult] = useState<Result>(),
+    [gen, setGen] = useState<Generated>(),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [status, setStatus] = useState("");
+    [status, setStatus] = useState(""),
+    [saveTitle, setSaveTitle] = useState(""),
+    [retry, setRetry] = useState<(() => void) | null>(null);
+  const [latest] = useState(createLatest);
   useEffect(() => {
     let alive = true;
+    setSources([]);
+    setDatabase("");
     rows<Source>("target_databases", { org_id: org })
       .then((data) => {
         if (!alive) return;
-        const supported = data.filter((s) =>
-          ["postgres", "sqlite"].includes(s.dialect),
-        );
+        const supported = data.filter((s) => ["postgres", "sqlite"].includes(s.dialect));
         setSources(supported);
-        setDatabase(supported[0]?.id || "");
+        setDatabase(
+          initial && supported.some((s) => s.id === initial.database)
+            ? initial.database
+            : supported[0]?.id || "",
+        );
       })
       .catch((e) => {
         if (alive) setError(e.message);
@@ -70,47 +153,52 @@ export function LiveEngine({ org, admin }: { org: string; admin: boolean }) {
     return () => {
       alive = false;
     };
-  }, [org]);
+  }, [org, initial]);
   useEffect(() => {
+    latest.cancel();
+    setBusy(false);
+    setRetry(null);
     setSchema({});
     setUri("");
     setResult(undefined);
-    setSql("");
+    setGen(undefined);
+    setSql(initial?.database === database ? initial.sql : "");
     setError("");
     setStatus("");
-  }, [database]);
-  async function run(action: () => Promise<void>) {
+  }, [database, initial, latest]);
+  async function run(action: (alive: () => boolean) => Promise<void>, retryable = false) {
     if (busy) return;
+    const alive = latest.next();
     setBusy(true);
     setError("");
     setStatus("");
+    setRetry(null);
     try {
-      await action();
+      await action(alive);
     } catch (e) {
+      if (!alive()) return;
       setError(e instanceof Error ? e.message : String(e));
+      if (retryable) setRetry(() => () => void run(action, true));
     } finally {
-      setBusy(false);
+      if (alive()) setBusy(false);
     }
   }
-  const csvSource =
-    sources.find((source) => source.id === database)?.dialect === "sqlite";
+  const csvSource = sources.find((source) => source.id === database)?.dialect === "sqlite";
+  const f = filter.trim().toLowerCase();
+  const visible = Object.entries(schema).filter(
+    ([t, cols]) => !f || t.toLowerCase().includes(f) || Object.keys(cols).some((c) => c.toLowerCase().includes(f)),
+  );
+  const insert = (text: string) => setSql((s) => (s ? s + (s.endsWith(" ") ? "" : " ") : "") + text);
   return (
     <section className="panel">
       <h2>Query engine</h2>
       {!sources.length ? (
-        <p>
-          Ask an administrator to register a PostgreSQL or SQLite database and
-          grant query access.
-        </p>
+        <p>Ask an administrator to register a PostgreSQL or SQLite database and grant query access.</p>
       ) : (
         <>
           <label>
             Database
-            <select
-              disabled={busy}
-              value={database}
-              onChange={(e) => setDatabase(e.target.value)}
-            >
+            <select disabled={busy} value={database} onChange={(e) => setDatabase(e.target.value)}>
               {sources.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -129,22 +217,16 @@ export function LiveEngine({ org, admin }: { org: string; admin: boolean }) {
                   const file = e.target.files?.[0];
                   e.target.value = "";
                   if (file)
-                    void run(async () => {
-                      if (file.size > 1048576)
-                        throw Error("Choose a CSV up to 1 MB.");
-                      const saved = await engine<{
-                        rows: number;
-                        columns: string[];
-                      }>(database, "import", file, "PUT");
+                    void run(async (alive) => {
+                      if (file.size > 1048576) throw Error("Choose a CSV up to 1 MB.");
+                      const saved = await engine<{ rows: number; columns: string[] }>(database, "import", file, "PUT");
+                      if (!alive()) return;
                       setSchema({});
                       setResult(undefined);
                       setStatus(
-                        "Imported " +
-                          saved.rows +
-                          " rows into records. Configure allowed columns in Roles & access: " +
-                          saved.columns.join(", "),
+                        "Imported " + saved.rows + " rows into records. Configure allowed columns in Roles & access: " + saved.columns.join(", "),
                       );
-                    });
+                    }, true);
                 }}
               />
             </label>
@@ -155,13 +237,13 @@ export function LiveEngine({ org, admin }: { org: string; admin: boolean }) {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  void run(async () => {
-                    await engine(database, "connection", { uri }, "PUT");
+                  const value = uri;
+                  void run(async (alive) => {
+                    await engine(database, "connection", { uri: value }, "PUT");
+                    if (!alive()) return;
                     setUri("");
-                    setStatus(
-                      "Connection verified and encrypted on the server.",
-                    );
-                  });
+                    setStatus("Connection verified and encrypted on the server.");
+                  }, true);
                 }}
               >
                 <label>
@@ -175,72 +257,92 @@ export function LiveEngine({ org, admin }: { org: string; admin: boolean }) {
                     placeholder="postgresql://user:password@host/database"
                   />
                 </label>
-                <small>
-                  Use a dedicated read-only database user. The host must be
-                  approved in the server settings.
-                </small>
+                <small>Use a dedicated read-only database user. The host must be approved in the server settings.</small>
                 <button disabled={busy}>Verify & save connection</button>
               </form>
             </details>
           )}
-          <button
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const data = await engine<{ tables: typeof schema }>(
-                  database,
-                  "schema",
-                );
-                setSchema(data.tables);
-                setStatus("Permitted schema loaded.");
-              })
-            }
-          >
-            Load permitted schema
-          </button>
-          {Object.keys(schema).length > 0 && (
-            <div className="compiled">
-              <pre>
-                {Object.entries(schema)
-                  .map(
-                    ([table, cols]) =>
-                      table + " (" + Object.keys(cols).join(", ") + ")",
-                  )
-                  .join("\n")}
-              </pre>
-            </div>
-          )}
+          <div className="schema-nav">
+            <button
+              disabled={busy}
+              onClick={() =>
+                void run(async (alive) => {
+                  const data = await engine<{ tables: typeof schema }>(database, "schema");
+                  if (!alive()) return;
+                  setSchema(data.tables);
+                  setStatus(Object.keys(data.tables).length ? "Permitted schema loaded." : "No tables are permitted for you yet.");
+                }, true)
+              }
+            >
+              {Object.keys(schema).length ? "Reload schema" : "Load permitted schema"}
+            </button>
+            {Object.keys(schema).length > 0 && (
+              <>
+                <label>
+                  Find a table or column
+                  <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} />
+                </label>
+                <ul className="schema-tree" aria-label="Permitted tables">
+                  {visible.map(([table, cols]) => (
+                    <li key={table}>
+                      <details open={!!f}>
+                        <summary>
+                          {table} <small>{Object.keys(cols).length} columns</small>
+                        </summary>
+                        <button type="button" className="chip" onClick={() => insert(table)}>
+                          Insert table name
+                        </button>
+                        <ul>
+                          {Object.entries(cols).map(([c, type]) => (
+                            <li key={c}>
+                              <button type="button" className="chip" onClick={() => insert(c)} aria-label={"Insert column " + c}>
+                                {c}
+                              </button>{" "}
+                              <small>{type}</small>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    </li>
+                  ))}
+                  {!visible.length && <li>No matches.</li>}
+                </ul>
+              </>
+            )}
+          </div>
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void run(async () => {
-                const generated = await engine<{ sql: string }>(
-                  database,
-                  "generate",
-                  { question },
-                );
+              void run(async (alive) => {
+                const generated = await engine<Generated>(database, "generate", { question });
+                if (!alive()) return;
                 setSql(generated.sql);
+                setGen(generated);
                 setResult(undefined);
-                setStatus(
-                  "SQL generated by the local model. Review it, then run.",
-                );
+                setStatus("SQL generated. Review it, then run.");
               });
             }}
           >
             <label>
               Ask about this database
-              <input
-                required
-                maxLength={2000}
-                disabled={busy}
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-              />
+              <input required maxLength={2000} disabled={busy} value={question} onChange={(e) => setQuestion(e.target.value)} />
             </label>
-            <button disabled={busy || !question.trim()}>
-              Generate with Ollama ↗
-            </button>
+            <button disabled={busy || !question.trim()}>Generate with Ollama ↗</button>
           </form>
+          {gen && (
+            <p className="gen-meta" role="status">
+              {gen.cache === "hit" ? (
+                <span className="badge">Reused from cache · re-checked against your permissions</span>
+              ) : (
+                <span className="badge">Freshly generated</span>
+              )}
+              {gen.attempts != null && gen.attempts > 1 && (
+                <span className="badge warn">
+                  Corrected automatically after {gen.attempts - 1} failed attempt{gen.attempts > 2 ? "s" : ""}
+                </span>
+              )}
+            </p>
+          )}
           <section className="sql-panel">
             <label className="sql-toolbar" htmlFor="live-sql">
               SQL query
@@ -259,9 +361,10 @@ export function LiveEngine({ org, admin }: { org: string; admin: boolean }) {
                 className="primary"
                 disabled={busy || !sql.trim()}
                 onClick={() =>
-                  void run(async () => {
+                  void run(async (alive) => {
                     setResult(undefined);
-                    setResult(await engine<Result>(database, "query", { sql }));
+                    const r = await engine<Result>(database, "query", { sql });
+                    if (alive()) setResult(r);
                   })
                 }
               >
@@ -269,31 +372,28 @@ export function LiveEngine({ org, admin }: { org: string; admin: boolean }) {
               </button>
             </div>
           </section>
+          {sql.trim() && (
+            <form
+              className="save-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run(async () => {
+                  await saveQuery(org, database, saveTitle.trim(), sql);
+                  setSaveTitle("");
+                  setStatus("Saved privately. Share it from the Saved queries tab.");
+                });
+              }}
+            >
+              <label>
+                Save this query as
+                <input required maxLength={100} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} />
+              </label>
+              <button disabled={busy || !saveTitle.trim()}>Save query</button>
+            </form>
+          )}
           {result && (
             <>
-              <p role="status">
-                {result.row_count} rows · {result.elapsed_ms} ms
-              </p>
-              <div className="data-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      {result.columns.map((c, i) => (
-                        <th key={i}>{c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.rows.map((row, i) => (
-                      <tr key={i}>
-                        {row.map((v, j) => (
-                          <td key={j}>{v === null ? "NULL" : String(v)}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ResultTable result={result} />
               <details>
                 <summary>Executed SQL</summary>
                 <pre className="live-compiled">{result.sql}</pre>
@@ -303,7 +403,19 @@ export function LiveEngine({ org, admin }: { org: string; admin: boolean }) {
         </>
       )}
       {busy && <AnimalMorphLoader label="Processing database request" />}
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <div role="alert" className="query-error">
+          <p>{error}</p>
+          {retry && (
+            <button type="button" onClick={retry}>
+              Try again
+            </button>
+          )}
+          <button type="button" onClick={() => { setError(""); setRetry(null); }}>
+            Dismiss
+          </button>
+        </div>
+      )}
       <p role="status">{status}</p>
     </section>
   );

@@ -1,3 +1,4 @@
+const ENGINE: string = import.meta.env["VITE_ENGINE_URL"] || "/api";
 import { useEffect, useState } from "react";
 import { AnimalMorphLoader } from "./Motion";
 
@@ -18,10 +19,10 @@ type Result = {
   row_cap: number;
 };
 async function api<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch("/api/" + path, {
+  const response = await fetch(ENGINE + "/" + path, {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
+    body: body ? JSON.stringify(body) : null,
     signal: AbortSignal.timeout(path === "sample/ask" ? 195000 : 15000),
   });
   if (!response.ok) {
