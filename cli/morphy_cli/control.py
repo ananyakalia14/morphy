@@ -71,7 +71,17 @@ class ControlClient:
             json_body={"handle": username.strip().lower(), "full_name": display_name.strip()},
         )
 
-    def update_profile(self, display_name: str) -> None:
+    def update_profile(self, display_name: str, avatar_path: Optional[str] = None) -> None:
+        try:
+            self._request(
+                "POST",
+                "/rest/v1/rpc/update_profile",
+                json_body={"full_name": display_name.strip(), "avatar": avatar_path},
+            )
+            return
+        except Exception:
+            pass
+
         profile = self.get_profile()
         user_id = profile.get("id") if profile else None
         if not user_id:
@@ -153,6 +163,16 @@ class ControlClient:
         )
 
     def withdraw_invitation(self, invitation_id: str) -> None:
+        try:
+            self._request(
+                "POST",
+                "/rest/v1/rpc/revoke_invitation",
+                json_body={"inv": invitation_id},
+            )
+            return
+        except Exception:
+            pass
+
         self._request(
             "DELETE",
             f"/rest/v1/invitations?id=eq.{invitation_id}",

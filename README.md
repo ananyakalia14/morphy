@@ -19,7 +19,7 @@ Work on separate branches and submit pull requests into main. API or migration c
 
 Requirements are Node 22, Python 3.12, Docker Desktop with a working Linux engine and Ollama with qwen2.5-coder:7b.
 
-On Windows run ./start-local.ps1 from this repository. It starts local Supabase, applies both migrations, generates a persistent local encryption key, installs the engine and CLI, and launches the API and web app. Configuration and keys are kept in ignored .local/ files. Stop existing processes on 5173 and 8000 first.
+On Windows run ./start-local.ps1 from this repository. It starts local Supabase, applies the control-plane migrations, generates a persistent local encryption key, installs the engine and CLI, and launches the API and web app. Configuration and keys are kept in ignored .local/ files. Stop existing processes on 5173 and 8000 first.
 
 For the standalone sample workspace run ./start-sample.ps1 and open http://127.0.0.1:5173/#explore. Its own-question option uses the local Qwen model and synthetic commerce data.
 
@@ -39,6 +39,8 @@ Supabase account and Storage journeys await full local verification because Dock
 ## Integration guides
 
 - [Engine API contract](docs/API.md)
+- [Execution evaluation guide](docs/EVALUATION.md)
+- [Dashboard data contract](docs/DASHBOARDS.md)
 - [Antigravity CLI brief and checklist](cli/README.md)
 - [Lovable website brief and checklist](frontend/README.md)
 - [Repository workflow](CONTRIBUTING.md)

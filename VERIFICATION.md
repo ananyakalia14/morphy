@@ -42,3 +42,14 @@ The web production build passed after the latest engine and import UI changes.
 
 ## Scoped SELECT engine update
 Source-level filtering passed for CTEs shadowing table names, nested SELECTs, correlated EXISTS and UNION/INTERSECT/EXCEPT. Hidden columns, denied set-operation branches, mutating CTEs and recursion were rejected. Pseudonym restoration covers reused and correlated aliases. The live PostgreSQL/Qwen run passed 25 tests. The final unit run passed 25 tests and skipped the service-dependent integration.
+
+
+## Execution evaluation runner
+The backend unit run passed 30 tests with one service-dependent integration skipped. New coverage verifies row multiplicity and ordering, protected dataset paths, BIRD-style fields, unchanged database bytes, result-cap exclusions and model/error outcomes. The real local Qwen smoke evaluation agreed on all three synthetic questions. See docs/evaluation-smoke.json.
+
+
+## Dashboard panel verification
+The local PostgreSQL fixture run passed 31 tests, including saved-panel rendering for a VIEW_ONLY user whose row policy differs from the author’s. Request-supplied SQL was ignored, arbitrary query execution stayed denied, a wrong dashboard ID returned 404 and unsharing the saved query removed panel visibility. The first optional model-inclusive run failed because Ollama was offline; the database/API run passed after separating inference from this integration.
+
+
+Account lifecycle: migration 005 adds caller-only profile editing and admin invitation withdrawal/reissue. A disposable PostgreSQL test checks invalid avatar ownership, invalid names, caller isolation, unauthorized withdrawal, idempotency, stale invitation ids, wrong-account acceptance and simultaneous acceptance/withdrawal. Supabase Auth/Storage UI verification remains open.

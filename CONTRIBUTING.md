@@ -26,7 +26,7 @@ Frontend changes additionally need desktop/mobile checks, keyboard navigation, r
 CLI changes need --help, sample commands, authenticated live requests, expired-token behavior, interruption and cancellation checks.
 Engine changes need policy and tenant-isolation tests plus a disposable PostgreSQL integration run when applicable. Changes to model prompts need a real local inference check when Ollama is available.
 
-The GitHub workflow runs unit tests and a production website build. PostgreSQL, Supabase, Redis and Ollama runtime checks require their own configured integration environment. State skipped checks in the PR.
+The GitHub workflow runs unit tests, a production website build, fresh PostgreSQL migrations, direct authenticated policy checks and the live PostgreSQL engine integration test. Full Supabase Auth/Storage, Redis and Ollama runtime checks require their own configured integration environment. State skipped checks in the PR.
 
 ## Repository settings
 

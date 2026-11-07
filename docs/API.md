@@ -42,6 +42,20 @@ FastAPI errors use a detail field. Handle 401 by asking the user to sign in agai
 
 Display actionable messages without exposing credentials. Do not blindly retry execution. Generation and schema requests may be retried by the user.
 
+## Saved query definitions (Supabase Data API)
+
+Use the signed-in user's Supabase client and the `saved_queries` table. Its REST path is `/rest/v1/saved_queries` on the Supabase origin. The resource stores SQL text only. Sharing makes the full definition, including SQL literals, visible to eligible organization members.
+
+| Operation | Client contract |
+| --- | --- |
+| Create | Insert `org_id`, `database_id`, `title`, `sql_text`, and optionally `shared`. A client-generated UUID in `id` supports retry reconciliation. Treat duplicate IDs as a conflict and read the existing definition before retrying. |
+| List | Select by `org_id` with `updated_at` descending and `id` as a tie-breaker. RLS filters every row by current database access. |
+| Edit, share or unshare | Update `title`, `sql_text` or `shared` with filters on both `id` and the last observed `revision`. Request returned rows. An empty result requires a reload because the version or permissions changed. |
+| Delete | Delete by `id` and last observed `revision`. Only the author with current query access may delete. |
+| Execute | Pass the selected definition's SQL to the existing authenticated engine query endpoint. The engine validates the current caller's policy again. |
+
+Definitions start private at revision 1. QUERY_ONLY and SCHEMA_EDIT users may author definitions. VIEW_ONLY users may read shared definitions, including the title and SQL, and receive no execution grant. Changing a database grant to NONE removes read access immediately. Database, organization and author IDs are immutable. Deleting the corresponding database or membership removes its associated definitions.
+
 ## Sample endpoints
 
 GET /sample/schema returns synthetic commerce metadata and curated example titles.
@@ -51,4 +65,27 @@ POST /sample/query executes against the synthetic SQLite dataset with a fixed AP
 GET /health reports API availability.
 
 Sample data is independent of organization authorization and must be labeled wherever presented.
+
+
+
+## Dashboard panels
+
+POST /engine/dashboards/{dashboard_id}/panels/{query_id}/render executes the visible stored query under the caller’s current data policy. VIEW_ONLY is supported for this saved-panel action. See [DASHBOARDS.md](DASHBOARDS.md) for definition CRUD, visibility and panel ordering.
+
+## Profile editing and invitation withdrawal
+
+
+Apply migration 005. Call these Supabase RPCs with the signed-in session:
+
+
+- `update_profile({full_name, avatar})` edits only the caller's existing display name and avatar path. Send the current avatar path to keep it, or null to clear it. Upload WebP to the caller's existing `<user-id>/profile.webp` Storage path first. Clearing the reference does not delete the stored object. Names must contain 1–80 characters after trimming. Global username and account id remain unchanged. Refresh the caller's `profiles` record after success.
+
+- `revoke_invitation({inv})` withdraws a pending invitation for an organization administrator. Revoking an already revoked invite is a no-op. Accepted invitations cannot be revoked; this action never removes a member. Recipient and administrator can read the `revoked` status through the existing invitation policy.
+
+- `invite_person({o, person, r})` can reissue a revoked invite. Reissue creates a new invitation id, preserves the single row per organization/recipient, and records the current inviter, role and timestamp. Clients must refresh invitation ids; an old id cannot accept a reissued invitation. Updating a pending invitation keeps its id.
+
+- `accept_invitation({inv})` requires the matching account and pending status. Acceptance of an already accepted id by its recipient remains idempotent. Acceptance, withdrawal and reissue serialize per organization, so a simultaneous accept/revoke has exactly one winner.
+
+
+Direct profile and invitation writes remain disallowed. Invitation actions write audit events. Profile editing does not alter database permissions. Frontend and CLI account/settings screens must call these RPCs; no new engine HTTP endpoints are required.
 
