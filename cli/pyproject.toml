@@ -5,9 +5,29 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "morphy-cli"
 version = "0.5.0"
-description = "MORPHY governed query terminal"
+description = "MORPHY — governed natural-language database terminal"
+readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    { name = "Ananya Kalia", email = "ananyakalia2704@gmail.com" }
+]
+keywords = ["sql", "cli", "database", "query", "governed-sql", "terminal", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+]
 dependencies = ["httpx>=0.27,<1", "prompt-toolkit>=3.0,<4", "keyring>=24.0.0"]
+
+[project.urls]
+Homepage = "https://morphy-web.vercel.app"
+Repository = "https://github.com/ananyakalia14/morphy"
+Issues = "https://github.com/ananyakalia14/morphy/issues"
 
 [project.scripts]
 morphy = "morphy_cli.main:main"

@@ -86,7 +86,15 @@ Stable exit codes:
 ### Requirements
 - Python >= 3.11
 
-### Installation
+### Global Installation (PyPI)
+Install anywhere using `pip` or `pipx`:
+```bash
+pip install --upgrade morphy-cli
+# or isolated using pipx:
+pipx install morphy-cli
+```
+
+### Local Development Installation
 From the repository root:
 ```bash
 python -m pip install -e ./cli

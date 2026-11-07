@@ -56,7 +56,7 @@ Hosted Supabase password sessions, separate organizations, shared dashboards and
 
 Website build runs npm ci and npm run build in frontend/.
 Engine checks run python -m pip install -r backend/requirements.txt pytest followed by python -m pytest tests -q in backend/.
-Install the terminal with python -m pip install -e ./cli and run morphy --help.
+Install the terminal with `pip install morphy-cli` (or `python -m pip install -e ./cli` for local development) and run `morphy --help`.
 
 The PostgreSQL integration test requires MORPHY_INTEGRATION_DSN pointing to a disposable migrated control plane. Set MORPHY_TEST_OLLAMA=1 to include real Qwen generation. It creates and removes a separate test database. Browser tests in tests/ require a running website/API and Chrome. Live inference testing additionally requires Ollama.
 
