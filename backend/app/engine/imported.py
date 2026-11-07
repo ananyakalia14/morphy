@@ -10,39 +10,6 @@ from contextlib import closing
 from .security import compile_query
 
 
-def salary_rank_sql(question, columns):
-    rank = re.fullmatch(
-        r"who (?:earns (?:the )?(lowest|least|highest|most)"
-        r"|has the (lowest|highest) (?:salary|pay))[?.!]*",
-        " ".join(question.lower().split()),
-    )
-    if rank is None:
-        return None
-
-    names = {column.lower(): column for column in columns}
-    salaries = names.keys() & {"salary", "base_salary", "annual_salary", "pay", "wage"}
-    identity = [names[key] for key in ("first_name", "last_name") if key in names]
-    if not identity:
-        identity = [
-            names[key]
-            for key in ("full_name", "employee_name", "name", "employee_id", "id")
-            if key in names
-        ][:1]
-    if len(salaries) != 1 or not identity:
-        raise ValueError(
-            "Salary ranking requires one permitted pay column and a name or ID."
-        )
-
-    salary = names[salaries.pop()]
-    fields = ", ".join(f'"{column}"' for column in [*identity, salary])
-    amount = f'morphy_number("{salary}")'
-    aggregate = "MIN" if (rank[1] or rank[2]) in {"lowest", "least"} else "MAX"
-    return (
-        f"SELECT {fields} FROM records WHERE {amount} = "
-        f"(SELECT {aggregate}({amount}) FROM records)"
-    )
-
-
 def numeric_text(value):
     if value is None or not re.fullmatch(
         r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?",

@@ -7,13 +7,14 @@ import json
 import re
 
 import httpx
-from sqlglot import exp, parse
+from sqlglot import exp, parse, transpile
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.errors import SqlglotError
 
 from .security import compile_query, physical_tables
 from sqlglot.optimizer.scope import traverse_scope
 from .retrieval import semantic_anchors
+from .csv_queries import numeric_candidates, validate_numeric_operations
 
 VOCABULARY = {
     "customer": "customer",
@@ -37,6 +38,18 @@ VOCABULARY = {
     "employee": "employee",
     "patient": "individual",
     "dob": "birth_date",
+    "salary": "compensation",
+    "wage": "compensation",
+    "pay": "compensation",
+    "earning": "compensation",
+    "quantity": "quantity",
+    "qty": "quantity",
+    "age": "age",
+    "cost": "cost",
+    "expense": "cost",
+    "city": "city",
+    "department": "group",
+    "score": "score",
 }
 
 
@@ -142,7 +155,9 @@ class Glossary:
         return tree.sql(dialect="postgres")
 
 
-async def draft(config, question, reflected, policy, edges, validate_plan=None):
+async def draft(
+    config, question, reflected, policy, edges, validate_plan=None, *, result_dialect="postgres"
+):
     permitted = {
         t: {c: reflected[t][c] for c in cols if c in reflected[t]}
         for t, cols in policy["table_columns"].items()
@@ -154,14 +169,28 @@ async def draft(config, question, reflected, policy, edges, validate_plan=None):
     if not context:
         raise ValueError("No permitted columns")
     glossary = Glossary(context, edges)
-    guide = json.dumps({"tables": glossary.schema, "foreign_keys": glossary.joins})
+    guide_data = {"tables": glossary.schema, "foreign_keys": glossary.joins}
+    csv_rules = ""
+    measures = set()
+    if result_dialect == "sqlite":
+        measures = numeric_candidates(context.get("records", {}))
+        guide_data["numeric_candidates"] = sorted(
+            glossary.columns["records"][column] for column in measures
+        )
+        csv_rules = (
+            " The target is a CSV import, so physical columns store text. "
+            "Use MORPHY_NUMBER(column) for numeric calculations, numeric comparisons and numeric ordering. "
+            "It returns NULL for blanks and invalid numbers. Exclude NULLs when ranking. "
+            "Keep labels and identifiers as text."
+        )
+    guide = json.dumps(guide_data)
     if len(guide) > 32000:
         raise ValueError("Please narrow the question")
     messages = [
         {
             "role": "system",
-            "content": "Return JSON with one sql string containing a PostgreSQL read query. Use the exact identifiers listed here. Use authorized joins and aggregates. Give result columns readable aliases. Non-recursive CTEs, nested queries and UNION are supported. No writes, locks or recursive CTEs. Schema: "
-            + guide,
+            "content": "Return JSON with one sql string containing a PostgreSQL read query. Use the exact identifiers listed here. Use authorized joins and aggregates. Select only columns needed to answer the question. Give result columns readable aliases. Non-recursive CTEs, nested queries and UNION are supported. No writes, locks or recursive CTEs."
+            + csv_rules + " Schema: " + guide,
         },
         {"role": "user", "content": question},
     ]
@@ -184,7 +213,10 @@ async def draft(config, question, reflected, policy, edges, validate_plan=None):
                 if not isinstance(candidate, str) or len(candidate) > 12000:
                     raise ValueError("Invalid query length")
                 sql = glossary.restore(candidate)
-                compiled = compile_query(sql, reflected, policy)
+                if result_dialect == "sqlite":
+                    sql = transpile(sql, read="postgres", write="sqlite")[0]
+                    validate_numeric_operations(sql, {column.lower() for column in measures})
+                compiled = compile_query(sql, reflected, policy, dialect=result_dialect)
                 if validate_plan:
                     await validate_plan(compiled)
                 return {
@@ -210,7 +242,8 @@ async def draft(config, question, reflected, policy, edges, validate_plan=None):
                             "role": "user",
                             "content": "Correct the SQL. Validator category: "
                             + diagnostic
-                            + ". Check the listed table/column identifiers, aliases, aggregate grouping, SELECT syntax and permitted functions.",
+                            + ". Check the listed table/column identifiers, aliases, aggregate grouping, SELECT syntax and permitted functions."
+                            + csv_rules,
                         },
                     ]
                 )

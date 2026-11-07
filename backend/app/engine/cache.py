@@ -10,7 +10,7 @@ from redis.exceptions import RedisError
 
 def generation_key(database, question, model, schema, policy, edges):
     payload = [
-        "v1",
+        "v2",
         str(database),
         question,
         model,
