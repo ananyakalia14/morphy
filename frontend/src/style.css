@@ -1122,6 +1122,11 @@ button.link{background:none;border:0;padding:0;text-decoration:underline;cursor:
 .schema-tree ul{list-style:none;padding-left:14px}
 .overview-tables{display:grid;gap:1rem;overflow-wrap:anywhere}
 .overview-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem}
+.query-guidance{border-left:3px solid #0047ff;padding:.75rem 1rem;margin:1rem 0;overflow-wrap:anywhere}
+.query-guidance h3{margin-top:0}
+.result-summary-values{display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:0}
+.result-summary-values dt{font-family:"JetBrains Mono",monospace;font-size:.8rem}
+.result-summary-values dd{font-weight:700;margin:0}
 .chip{font-size:.8em;padding:2px 8px;border-radius:999px}
 .gen-meta{display:flex;gap:8px;flex-wrap:wrap}
 .badge{font-size:.78em;padding:3px 10px;border-radius:999px;border:1px solid #0047ff;color:#0047ff}

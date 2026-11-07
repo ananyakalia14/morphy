@@ -32,6 +32,25 @@ def numeric_candidates(columns):
     }
 
 
+def question_examples(columns):
+    if not columns:
+        return []
+    examples = ["How many records are there?"]
+    category = next(
+        (column for column in columns
+         if column.lower() in {"city", "department", "region", "category", "status"}),
+        None,
+    )
+    metric = next(iter(sorted(numeric_candidates(columns))), None)
+    if category:
+        examples.append(f"Count records by {category}")
+    if metric:
+        grouped = f" by {category}" if category else ""
+        examples.append(f"What is the average {metric}{grouped}?")
+        examples.append(f"Top 5 by {metric}")
+    return examples
+
+
 class NumericMetricRequiresConversion(ValueError):
     pass
 
@@ -61,30 +80,55 @@ def validate_numeric_operations(sql, measures):
             raise NumericMetricRequiresConversion
 
 
-def column_for(label, columns):
+def matching_columns(label, columns, *, implicit=False):
     label = label.replace("_", " ")
-    if label in columns:
-        return columns[label]
+    if not implicit and label in columns:
+        return [columns[label]]
     for names in METRIC_NAMES:
         if label in names:
-            matches = columns.keys() & names
-            if len(matches) > 1:
-                raise ValueError("Several permitted columns match that metric. Use the exact column name.")
-            return columns[next(iter(matches))] if matches else None
-    return None
+            return sorted(columns[name] for name in columns.keys() & names)
+    return []
 
 
-def analytics_sql(question, permitted_columns):
+class ColumnClarification(ValueError):
+    def __init__(self, choices):
+        super().__init__("Several permitted columns match that metric. Which column should MORPHY use?")
+        self.choices = choices
+
+
+def analytics_sql(question, permitted_columns, *, exact_columns=False):
     """Return a draft for a recognized intent, or defer to the model."""
     question = " ".join(question.lower().split()).rstrip(" ?.!")
-    columns = {name.lower().replace("_", " "): f'"{name}"' for name in permitted_columns}
+    columns = {name.lower().replace("_", " "): name for name in permitted_columns}
+
+    def resolve(label, span=None):
+        if exact_columns:
+            column = columns.get(label.replace("_", " "))
+            return f'"{column}"' if column else None
+        matches = matching_columns(label, columns, implicit=span is None)
+        if len(matches) > 1:
+            if span is None:
+                direction = "lowest" if question.split()[-1] in {"least", "lowest"} else "highest"
+                choices = [
+                    {"column": column, "question": f"Who has the {direction} {column}?"}
+                    for column in matches
+                ]
+            else:
+                start, end = span
+                choices = [
+                    {"column": column, "question": question[:start] + column + question[end:]}
+                    for column in matches
+                ]
+            raise ColumnClarification(choices)
+        return f'"{matches[0]}"' if matches else None
+
     count = re.fullmatch(
         r"(?:count (?:the )?|how many )(?:rows|records)(?: are there)?(?:(?: by | per )(.+))?",
         question,
     )
     if count and columns:
         if count[1]:
-            category = column_for(count[1], columns)
+            category = resolve(count[1], count.span(1))
             if category:
                 return (
                     f"SELECT {category}, COUNT(*) AS row_count FROM records "
@@ -102,8 +146,8 @@ def analytics_sql(question, permitted_columns):
     )
     if aggregate:
         operation, metric, group = aggregate.groups()
-        value = column_for(metric, columns)
-        category = column_for(group, columns) if group else None
+        value = resolve(metric, aggregate.span(2))
+        category = resolve(group, aggregate.span(3)) if value and group else None
         if value and (category or not group):
             calculation = f"{AGGREGATES[operation]}(morphy_number({value}))"
             if category:
@@ -116,7 +160,8 @@ def analytics_sql(question, permitted_columns):
         return None
 
     label = "compensation" if earnings else person[2] if person else top[3]
-    value = column_for(label, columns)
+    span = None if earnings else person.span(2) if person else top.span(3)
+    value = resolve(label, span)
     if not value:
         if earnings or label in METRIC_NAMES[0]:
             raise ValueError("Choose a permitted pay column to rank.")
@@ -130,7 +175,7 @@ def analytics_sql(question, permitted_columns):
         identity = (labels or (other_labels if len(other_labels) == 1 else []) or identifiers)[:1]
     if (earnings or person) and not identity:
         raise ValueError("This question requires a permitted name or ID column.")
-    fields = ", ".join(dict.fromkeys([*identity, value]))
+    fields = ", ".join(dict.fromkeys([*(f'"{name}"' for name in identity), value]))
     number = f"morphy_number({value})"
     if top:
         direction = "DESC" if top[1] == "top" else "ASC"
