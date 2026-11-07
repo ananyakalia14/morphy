@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-const url = import.meta.env.VITE_SUPABASE_URL,
-  key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const url = import.meta.env["VITE_SUPABASE_URL"],
+  key = import.meta.env["VITE_SUPABASE_ANON_KEY"];
 export const db = url && key ? createClient(url, key) : null;
 export async function rpc<T = unknown>(
   name: string,
@@ -36,6 +36,7 @@ export type Person = {
 export type Invite = {
   id: string;
   user_id: string;
+  role_id: string;
   status: string;
   organization_name: string;
   org_id: string;

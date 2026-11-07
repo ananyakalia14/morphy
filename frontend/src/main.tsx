@@ -1,3 +1,5 @@
+import { createRoot } from "react-dom/client";
+import "./style.css";
 import { QueryWorkbench } from './QueryWorkbench';
 import {
   useCallback,
@@ -5,13 +7,12 @@ import {
   useState,
   type FormEvent,
   type ReactNode,
+  useRef,
 } from "react";
-import { createRoot } from "react-dom/client";
 import type { Session } from "@supabase/supabase-js";
 import "@fontsource/syne/700.css";
 import "@fontsource/syne/800.css";
 import "@fontsource/jetbrains-mono/500.css";
-import "./style.css";
 import {
   db,
   rpc,
@@ -21,9 +22,56 @@ import {
   type Org,
   type Invite,
 } from "./client";
-import { AnimalMorphLoader, Intro, useReducedMotion } from "./Motion";
+import { AnimalMorphLoader, Intro } from "./Motion";
 import { Landing } from "./Landing";
 import { Workspace } from "./Workspace";
+import { SESSION_EXPIRED } from "./LiveEngine";
+
+function ProfileEditor({ profile, done }: { profile: Profile; done: () => Promise<void> }) {
+  const [name, setName] = useState(profile.display_name),
+    [file, setFile] = useState<File | null>(null),
+    [clear, setClear] = useState(false),
+    [msg, setMsg] = useState("");
+  const { busy, error, run } = useAction();
+  return (
+    <details className="profile-edit">
+      <summary>Edit profile</summary>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setMsg("");
+          void run(async () => {
+            const n = name.trim();
+            if (n.length < 1 || n.length > 80) throw Error("Names must be 1–80 characters.");
+            const avatar = file ? await uploadAvatar(file, profile.id) : clear ? null : profile.avatar_path;
+            await rpc("update_profile", { full_name: n, avatar });
+            setFile(null);
+            setClear(false);
+            await done();
+            setMsg("Profile saved.");
+          });
+        }}
+      >
+        <label>
+          Display name
+          <input required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label>
+          New profile picture (JPG, PNG or WebP)
+          <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </label>
+        {profile.avatar_path && !file && (
+          <label className="check">
+            <input type="checkbox" checked={clear} onChange={(e) => setClear(e.target.checked)} /> Remove current picture
+          </label>
+        )}
+        <small>Your username @{profile.username} can't be changed.</small>
+        <button className="primary" disabled={busy}>Save profile</button>
+        <p aria-live="polite">{error || msg}</p>
+      </form>
+    </details>
+  );
+}
 
 import { useAction } from "./useAction";
 function Shell({
@@ -141,7 +189,7 @@ function Auth({ initial, back }: { initial: string; back: () => void }) {
           </form>
           {["github", "google"]
             .filter((p) =>
-              (import.meta.env.VITE_OAUTH_PROVIDERS || "")
+              (import.meta.env["VITE_OAUTH_PROVIDERS"] || "")
                 .split(",")
                 .includes(p),
             )
@@ -189,7 +237,7 @@ function Identity({
   done: () => Promise<void>;
 }) {
   const defaultName = String(
-    session.user.user_metadata.full_name ||
+    session.user.user_metadata["full_name"] ||
       session.user.email?.split("@")[0] ||
       "",
   );
@@ -292,7 +340,7 @@ function Account({
   signout: () => void;
 }) {
   const [data, setData] = useState<{
-      profile?: Profile;
+      profile?: Profile | undefined;
       orgs: Org[];
       invites: Invite[];
     }>(),
@@ -337,6 +385,7 @@ function Account({
         <>
           <div className="account-bar">
             <strong>@{data.profile.username}</strong>
+            <ProfileEditor profile={data.profile} done={reload} />
             <button disabled={busy} onClick={() => void run(reload)}>
               Refresh invitations
             </button>
@@ -428,8 +477,7 @@ function Account({
     </Shell>
   );
 }
-function App() {
-  const reduced = useReducedMotion();
+export function App() {
   const [session, setSession] = useState<Session | null>(null),
     [ready, setReady] = useState(!db),
     [page, setPage] = useState(
@@ -439,14 +487,23 @@ function App() {
           ? "signup"
           : location.hash === "#explore" ? "explore" : "landing",
     );
-  const [intro, setIntro] = useState(
-    () =>
-      !sessionStorage.getItem("morphy.intro") &&
-      !location.hash &&
-      !location.search,
-  );
+  const [intro, setIntro] = useState(() => sessionStorage.getItem("morphy-intro-dismissed") !== "1" && !matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const [expiredNote, setExpiredNote] = useState(false);
+  useEffect(() => {
+    if (session) sessionStorage.removeItem("morphy-expired");
+    setExpiredNote(!session && sessionStorage.getItem("morphy-expired") === "1");
+  }, [session, page]);
+  const [morph, setMorph] = useState(false);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    setMorph(true);
+    window.scrollTo(0, 0);
+    const t = setTimeout(() => setMorph(false), 1400);
+    return () => clearTimeout(t);
+  }, [page, session?.user.id]);
   const close = useCallback(() => {
-    sessionStorage.setItem("morphy.intro", "1");
+    sessionStorage.setItem("morphy-intro-dismissed", "1");
     setIntro(false);
     requestAnimationFrame(() =>
       document
@@ -468,7 +525,16 @@ function App() {
             : location.hash === "#explore" ? "explore" : "landing",
       );
     window.addEventListener("hashchange", nav);
+    const expired = () => {
+      sessionStorage.setItem("morphy-expired", "1");
+      void db?.auth.signOut({ scope: "local" }).then(() => {
+        location.hash = "signin";
+        setPage("signin");
+      });
+    };
+    window.addEventListener(SESSION_EXPIRED, expired);
     return () => {
+      window.removeEventListener(SESSION_EXPIRED, expired);
       s?.data.subscription.unsubscribe();
       window.removeEventListener("hashchange", nav);
     };
@@ -477,6 +543,11 @@ function App() {
     location.hash = where === "landing" ? "" : where;
     setPage(where);
   }
+  const overlay = intro ? <Intro close={close} /> : morph ? (
+    <div className="page-morph" aria-hidden="true"><AnimalMorphLoader label="Morphing" /></div>
+  ) : null;
+  return <>{overlay}<div inert={intro || morph}>{view()}</div></>;
+  function view() {
   if (page === "explore") return <QueryWorkbench back={() => go("landing")} />;
   if (!ready) return <AnimalMorphLoader />;
   if (session)
@@ -490,15 +561,19 @@ function App() {
       />
     );
   if (page !== "landing")
-    return <Auth initial={page} back={() => go("landing")} />;
-  return (
-    <>
-      {intro && !reduced && <Intro close={close} />}
-      <div inert={intro && !reduced}>
-        <Landing start={() => go("signup")} signin={() => go("signin")} />
-      </div>
-    </>
-  );
+    return (
+      <>
+        {expiredNote && (
+          <p role="alert" className="expired-note">
+            Your session expired. Sign in again to continue.
+          </p>
+        )}
+        <Auth initial={page} back={() => go("landing")} />
+      </>
+    );
+  return <Landing start={() => go("signup")} signin={() => go("signin")} />;
+  }
 }
-createRoot(document.getElementById("root")!).render(<App />);
 
+
+createRoot(document.getElementById("root")!).render(<App />);

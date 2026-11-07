@@ -25,11 +25,10 @@ export function AnimalMorphLoader({
 }: {
   label?: string;
 }) {
-  const reduced = useReducedMotion(),
-    [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState(false);
   return (
     <div className="wait" role="status">
-      {reduced || failed ? (
+      {failed ? (
         <img src="/motion/bull.svg" alt="" />
       ) : (
         <video
@@ -154,7 +153,7 @@ export function HeroMorphCanvas() {
         {failed || reduced ? (
           <img
             className="animal"
-            src={"/motion/" + names[index].toLowerCase() + ".svg"}
+            src={"/motion/" + names[index]!.toLowerCase() + ".svg"}
             alt={"MORPHY " + names[index]}
           />
         ) : (
