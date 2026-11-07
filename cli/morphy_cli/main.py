@@ -88,6 +88,8 @@ def main():
                 )
         except EngineError as error:
             print(f"Error: {error.detail}", file=sys.stderr)
+            if error.status_code >= 500:
+                sys.exit(2)
             sys.exit(1)
         except httpx.HTTPError as error:
             print(f"Network error: {error}", file=sys.stderr)

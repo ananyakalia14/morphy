@@ -181,3 +181,12 @@ class MorphyClient:
             content=raw_bytes,
             headers={"Content-Type": "text/csv; charset=utf-8"},
         )
+
+    def render_panel(
+        self, dashboard_id: Union[UUID, str], query_id: Union[UUID, str]
+    ) -> dict[str, Any]:
+        """Render a saved dashboard panel under the caller's RLS policy."""
+        return self._request(
+            "POST",
+            f"/api/engine/dashboards/{dashboard_id}/panels/{query_id}/render",
+        )

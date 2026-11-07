@@ -72,3 +72,4 @@ class QueryStore:
             self._save(data)
             return True
         return False
+

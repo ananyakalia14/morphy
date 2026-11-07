@@ -34,7 +34,12 @@ The current CLI uses httpx and a simple input loop. Access tokens remain in the 
 - `/logout`: Clear active session, OS keyring credentials, and stored query results.
 - `/status`: Inspect active authentication, engine URL, active organization, and target database.
 - `/profile`: View your profile; `/profile claim <handle> <name>` or `/profile edit <name>` to edit display name.
-- `/dashboard`: Comprehensive terminal dashboard view with quick actions.
+- `/dashboard`: Comprehensive terminal dashboard view; `/dashboard [render <id>]` to render a saved dashboard.
+- `/dashboards`: List saved dashboards in the active database.
+- `/dashboard-create <title> [shared]`: Create a saved dashboard definition.
+- `/dashboard-add <dash_id> <query_id>`: Add a saved query panel to a dashboard.
+- `/permissions`: Inspect effective permissions and row filtering rules on active database.
+- `/perm-revoke <role|user>`: Revoke permissions on active database.
 
 ### Organizations & Databases
 - `/orgs`: List member organizations.

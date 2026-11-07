@@ -185,3 +185,139 @@ class ControlClient:
             json_body={"prefix": prefix.strip().lower()},
         ) or []
 
+    # --- Dashboards & Panels (004) ---
+
+    def list_dashboards(
+        self, org_id: Optional[str] = None, database_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        query = "/rest/v1/dashboards?select=*,dashboard_panels(*)&order=updated_at.desc"
+        if org_id:
+            query += f"&org_id=eq.{org_id}"
+        if database_id:
+            query += f"&database_id=eq.{database_id}"
+        return self._request("GET", query) or []
+
+    def get_dashboard(self, dashboard_id: str) -> Optional[dict[str, Any]]:
+        res = self._request(
+            "GET",
+            f"/rest/v1/dashboards?id=eq.{dashboard_id}&select=*,dashboard_panels(*)",
+        )
+        return res[0] if res else None
+
+    def create_dashboard(
+        self, org_id: str, database_id: str, title: str, shared: bool = False
+    ) -> str:
+        res = self._request(
+            "POST",
+            "/rest/v1/dashboards",
+            json_body={
+                "org_id": org_id,
+                "database_id": database_id,
+                "title": title.strip(),
+                "shared": shared,
+            },
+        )
+        if isinstance(res, list) and res:
+            return str(res[0].get("id"))
+        return str(res)
+
+    def add_dashboard_panel(
+        self, dashboard_id: str, database_id: str, query_id: str, position: int = 0
+    ) -> None:
+        self._request(
+            "POST",
+            "/rest/v1/dashboard_panels",
+            json_body={
+                "dashboard_id": dashboard_id,
+                "database_id": database_id,
+                "query_id": query_id,
+                "position": position,
+            },
+        )
+
+    def delete_dashboard(self, dashboard_id: str) -> None:
+        self._request("DELETE", f"/rest/v1/dashboards?id=eq.{dashboard_id}")
+
+    # --- Cloud Saved Queries (003) ---
+
+    def list_saved_queries(
+        self, org_id: Optional[str] = None, database_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        query = "/rest/v1/saved_queries?select=*&order=updated_at.desc"
+        if org_id:
+            query += f"&org_id=eq.{org_id}"
+        if database_id:
+            query += f"&database_id=eq.{database_id}"
+        return self._request("GET", query) or []
+
+    def create_saved_query(
+        self, org_id: str, database_id: str, title: str, sql_text: str, shared: bool = False
+    ) -> str:
+        res = self._request(
+            "POST",
+            "/rest/v1/saved_queries",
+            json_body={
+                "org_id": org_id,
+                "database_id": database_id,
+                "title": title.strip(),
+                "sql_text": sql_text.strip(),
+                "shared": shared,
+            },
+        )
+        if isinstance(res, list) and res:
+            return str(res[0].get("id"))
+        return str(res)
+
+    def delete_saved_query(self, query_id: str) -> None:
+        self._request("DELETE", f"/rest/v1/saved_queries?id=eq.{query_id}")
+
+    # --- Permissions & Access Policy ---
+
+    def save_permission(
+        self,
+        org_id: str,
+        database_id: str,
+        role_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        level: str = "QUERY_ONLY",
+        cols: Optional[dict[str, list[str]]] = None,
+        rules: Optional[list[dict[str, Any]]] = None,
+    ) -> None:
+        self._request(
+            "POST",
+            "/rest/v1/rpc/save_permission",
+            json_body={
+                "o": org_id,
+                "d": database_id,
+                "r": role_id,
+                "person": user_id,
+                "level": level,
+                "cols": cols or {},
+                "rules": rules or [],
+            },
+        )
+
+    def revoke_permission(
+        self,
+        org_id: str,
+        database_id: str,
+        role_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        self.save_permission(
+            org_id=org_id,
+            database_id=database_id,
+            role_id=role_id,
+            user_id=user_id,
+            level="NONE",
+            cols={},
+            rules=[],
+        )
+
+    def effective_permission(self, database_id: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/rest/v1/rpc/effective_permission",
+            json_body={"d": database_id},
+        ) or {"mode": "NONE", "table_columns": {}, "row_rules": []}
+

@@ -243,6 +243,46 @@ class TestControlClient:
             assert len(orgs) == 1
             assert orgs[0]["name"] == "Acme"
 
+    def test_control_plane_dashboards_and_permissions(self):
+        auth = MagicMock()
+        auth.get_valid_token.return_value = "tok123"
+        auth.supabase_key = "key123"
+        auth.supabase_url = "https://example.supabase.co"
+        control = ControlClient(auth)
+
+        with patch.object(control, "_request") as mock_req:
+            mock_req.return_value = [{"id": "d1", "title": "Board"}]
+            boards = control.list_dashboards("o1", "db1")
+            assert boards[0]["id"] == "d1"
+
+            control.create_dashboard("o1", "db1", "Board 2", shared=True)
+            mock_req.assert_called_with(
+                "POST",
+                "/rest/v1/dashboards",
+                json_body={"org_id": "o1", "database_id": "db1", "title": "Board 2", "shared": True},
+            )
+
+            control.add_dashboard_panel("d1", "db1", "q1", 0)
+            mock_req.assert_called_with(
+                "POST",
+                "/rest/v1/dashboard_panels",
+                json_body={"dashboard_id": "d1", "database_id": "db1", "query_id": "q1", "position": 0},
+            )
+
+            control.save_permission("o1", "db1", role_id="r1", level="VIEW_ONLY")
+            mock_req.assert_called_with(
+                "POST",
+                "/rest/v1/rpc/save_permission",
+                json_body={"o": "o1", "d": "db1", "r": "r1", "person": None, "level": "VIEW_ONLY", "cols": {}, "rules": []},
+            )
+
+            control.revoke_permission("o1", "db1", role_id="r1")
+            mock_req.assert_called_with(
+                "POST",
+                "/rest/v1/rpc/save_permission",
+                json_body={"o": "o1", "d": "db1", "r": "r1", "person": None, "level": "NONE", "cols": {}, "rules": []},
+            )
+
 
 # ── Mock Client & Shell ─────────────────────────────────────────────
 
@@ -291,6 +331,15 @@ class MockClient:
 
     def import_csv(self, data):
         return {"table": "records", "columns": ["a", "b"], "rows": 10}
+
+    def render_panel(self, dashboard_id, query_id):
+        return {
+            "columns": ["panel_metric", "val"],
+            "rows": [["revenue", 999.0]],
+            "row_count": 1,
+            "sql": "SELECT 'revenue', 999.0",
+            "elapsed_ms": 3.4,
+        }
 
 
 def create_test_context(is_live=False):
@@ -509,6 +558,100 @@ class TestHandleCommand:
         # Delete query
         del_res = _handle_command(ctx, "/delete-query my-test-query")
         assert "deleted" in del_res
+
+    def test_dashboards_listing_and_rendering(self):
+        ctx = create_test_context(is_live=True)
+        ctx.active_org_id = "org-123"
+        ctx.active_db_id = "db-456"
+
+        board_id = "board-abc-123"
+        query_id = "query-xyz-789"
+
+        with patch.object(ctx.control, "list_dashboards") as mock_list, \
+             patch.object(ctx.control, "get_dashboard") as mock_get, \
+             patch.object(ctx.control, "create_dashboard") as mock_create, \
+             patch.object(ctx.control, "add_dashboard_panel") as mock_add:
+
+            mock_list.return_value = [
+                {
+                    "id": board_id,
+                    "title": "Exec Overview",
+                    "shared": True,
+                    "dashboard_panels": [{"query_id": query_id, "position": 0}],
+                    "updated_at": "2026-11-07T08:00:00",
+                }
+            ]
+            mock_get.return_value = {
+                "id": board_id,
+                "title": "Exec Overview",
+                "shared": True,
+                "dashboard_panels": [{"query_id": query_id, "position": 0}],
+            }
+            mock_create.return_value = board_id
+
+            # List dashboards
+            list_res = _handle_command(ctx, "/dashboards")
+            assert "Exec Overview" in list_res
+            assert board_id in list_res
+
+            # Create dashboard
+            create_res = _handle_command(ctx, "/dashboard-create NewBoard shared")
+            assert "NewBoard" in create_res
+            mock_create.assert_called_once_with("org-123", "db-456", "NewBoard", shared=True)
+
+            # Add panel
+            add_res = _handle_command(ctx, f"/dashboard-add {board_id} {query_id} 1")
+            assert "added to dashboard" in add_res
+            mock_add.assert_called_once_with(board_id, "db-456", query_id, position=1)
+
+            # Render dashboard
+            render_res = _handle_command(ctx, f"/dashboard render {board_id}")
+            assert "DASHBOARD: Exec Overview" in render_res
+            assert "revenue" in render_res
+            assert "999" in render_res
+            assert ctx.last_result["rows"][0][1] == 999.0
+
+    def test_permissions_and_revocation(self):
+        ctx = create_test_context(is_live=True)
+        ctx.active_org_id = "org-123"
+        ctx.active_db_id = "db-456"
+
+        with patch.object(ctx.control, "effective_permission") as mock_perm, \
+             patch.object(ctx.control, "list_roles") as mock_roles, \
+             patch.object(ctx.control, "revoke_permission") as mock_revoke:
+
+            mock_perm.return_value = {
+                "mode": "QUERY_ONLY",
+                "table_columns": {"orders": ["id", "amount"]},
+                "row_rules": [{"table": "orders", "column": "region", "op": "eq", "value": "APAC"}],
+            }
+            mock_roles.return_value = [{"id": "role-admin-1", "name": "ADMIN"}]
+
+            # Check permissions
+            perm_res = _handle_command(ctx, "/permissions")
+            assert "Mode: QUERY_ONLY" in perm_res
+            assert "orders: id, amount" in perm_res
+            assert "orders.region eq APAC" in perm_res
+
+            # Revoke role permission
+            rev_res = _handle_command(ctx, "/perm-revoke ADMIN")
+            assert "Revoked permission for role 'ADMIN'" in rev_res
+            mock_revoke.assert_called_once_with("org-123", "db-456", role_id="role-admin-1")
+
+    def test_account_switching_isolation(self):
+        ctx = create_test_context()
+        ctx.last_result = {"columns": ["secret"], "rows": [["data"]]}
+        ctx.active_org_id = "old-org"
+        ctx.active_db_id = "old-db"
+
+        with patch.object(ctx.auth, "login") as mock_login, \
+             patch("getpass.getpass", return_value="pass123"):
+            mock_login.return_value = MagicMock(email="other@user.com")
+            res = _handle_command(ctx, "/login other@user.com", session=MagicMock())
+            assert "signed in as other@user.com" in res
+            assert ctx.last_result is None
+            assert ctx.active_org_id is None
+            assert ctx.active_db_id is None
 
 
 # ── Client & Entrypoint ─────────────────────────────────────────────
