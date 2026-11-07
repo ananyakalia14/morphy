@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { rpc, rows, type Source } from "./client";
+import { rpc } from "./client";
 import { engine } from "./LiveEngine";
 
 type Kind = "postgres" | "sqlite";
 type Step = "choose" | "details" | "working" | "done";
-type Tables = Record<string, Record<string, string>>;
+type Tables = Record<string, string[]>;
 
 const STAGES: Record<Kind, string[]> = {
-  postgres: ["Registering source", "Testing connection", "Discovering tables"],
-  sqlite: ["Registering source", "Importing file", "Reading columns"],
+  postgres: ["Registering source", "Testing connection and discovering tables"],
+  sqlite: ["Registering source", "Importing file and reading columns"],
 };
 
 export function ConnectWizard({
@@ -29,8 +29,7 @@ export function ConnectWizard({
     [summary, setSummary] = useState(""),
     [tables, setTables] = useState<Tables>({}),
     [sourceId, setSourceId] = useState(""),
-    [failedAt, setFailedAt] = useState(""),
-    [schemaFailed, setSchemaFailed] = useState(false);
+    [failedAt, setFailedAt] = useState("");
 
   function pickFile(f: File | undefined) {
     setError("");
@@ -63,36 +62,35 @@ export function ConnectWizard({
     try {
       let id = sourceId;
       if (!id) {
-        await rpc("register_database", { o: org, title: name, engine: kind });
-        const list = await rows<Source>("target_databases", { org_id: org });
-        const source = list.filter((s) => s.name === name).pop();
-        if (!source) throw Error("The source was registered but could not be found.");
-        id = source.id;
+        id = await rpc<string>("register_database", { o: org, title: name, engine: kind });
         setSourceId(id);
       }
-      const source = { id };
       at = 1;
       setStage(1);
       if (kind === "postgres") {
-        const r = await engine<{ tables?: number }>(source.id, "connection", { uri }, "PUT");
+        const r = await engine<{ tables: number; schema?: Record<string, Record<string, string>> }>(
+          id, "connection", { uri }, "PUT",
+        );
         setUri("");
+        setTables(Object.fromEntries(
+          Object.entries(r.schema ?? {}).map(([table, columns]) => [table, Object.keys(columns)]),
+        ));
         setSummary(
           "Connection verified and stored encrypted on the server" +
             (r.tables != null ? " · " + r.tables + " tables reflected." : "."),
         );
       } else {
-        const r = await engine<{ rows: number; columns: string[] }>(
-          source.id,
+        const r = await engine<{ table: string; rows: number; columns: string[] }>(
+          id,
           "import",
           file,
           "PUT",
         );
+        setTables({ [r.table]: r.columns });
         setSummary(
           "Imported " + r.rows + " rows and " + r.columns.length + " columns into “records”.",
         );
       }
-      setStage(2);
-      await loadSchema(source.id);
       setStep("done");
       onDone();
     } catch (e) {
@@ -103,21 +101,9 @@ export function ConnectWizard({
     }
   }
 
-  async function loadSchema(id: string) {
-    try {
-      const s = await engine<{ tables: Tables }>(id, "schema");
-      setTables(s.tables || {});
-      setSchemaFailed(false);
-    } catch {
-      setTables({});
-      setSchemaFailed(true);
-    }
-  }
-
   const reset = () => {
     setSourceId("");
     setFailedAt("");
-    setSchemaFailed(false);
     setStep("choose");
     setName("");
     setFile(null);
@@ -281,23 +267,12 @@ export function ConnectWizard({
             <div className="compiled">
               <pre>
                 {Object.entries(tables)
-                  .map(([t, c]) => t + " (" + Object.keys(c).join(", ") + ")")
+                  .map(([t, columns]) => t + " (" + columns.join(", ") + ")")
                   .join("\n")}
               </pre>
             </div>
-          ) : schemaFailed ? (
-            <p role="alert">
-              Couldn't read the tables yet.{" "}
-              <button type="button" onClick={() => void loadSchema(sourceId)}>
-                Try again
-              </button>
-            </p>
-          ) : (
-            <small>
-              No columns are visible yet. Grant table and column access in the
-              access policy below.
-            </small>
-          )}
+          ) : null}
+          <small>Configure table and column permissions below before querying this source.</small>
           <div className="wizard-actions">
             <button type="button" onClick={reset}>
               Add another source
