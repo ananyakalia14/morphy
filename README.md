@@ -15,6 +15,12 @@ This repository is the shared source of truth for Codex, Antigravity and Lovable
 
 Work on separate branches and submit pull requests into main. API or migration changes require coordinated updates. Follow [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 
+## Hosted workspace
+
+The [MORPHY website](https://morphy-web.vercel.app) and [engine health endpoint](https://morphy-engine.vercel.app/api/health) are deployed on Vercel. The website forwards its own `/api` requests to the engine, and both clients use the same hosted Supabase project. CLI users can select the deployed engine with `--url https://morphy-engine.vercel.app`.
+
+Production currently supports governed SQL over the configured sources. The optional Parquet reader, Redis and a remote inference provider must be configured separately. The local Ollama model remains available for development and benchmarking.
+
 ## Start locally
 
 Requirements are Node 22, Python 3.12, Docker Desktop with a working Linux engine and Ollama with qwen2.5-coder:7b.
@@ -34,7 +40,7 @@ For an independently configured live engine, copy backend/.env.example to backen
 - Optional Redis exact-question SQL cache, scoped to database, schema, permissions, model and graph.
 - Animated website, SQL/result inspection, session history, organization activity and initial live CLI.
 
-Supabase account and Storage journeys await full local verification because Docker's Linux engine is unavailable on the development machine. Tests exercise actual PostgreSQL with identities injected at the Supabase boundary. Read [COMPLETION.md](COMPLETION.md) and [VERIFICATION.md](VERIFICATION.md) for the exact limits.
+Hosted Supabase password sessions, separate organizations, shared dashboards and permission revocation were verified with two disposable accounts. Email confirmation, OAuth and avatar Storage still need end-to-end checks. Read [COMPLETION.md](COMPLETION.md) and [VERIFICATION.md](VERIFICATION.md) for the exact limits.
 
 ## Integration guides
 
