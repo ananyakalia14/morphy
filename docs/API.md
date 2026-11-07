@@ -12,13 +12,15 @@ Profiles, organizations, invitations, roles and permission settings are exposed 
 
 | Method and path | Input | Output |
 | --- | --- | --- |
-| PUT /engine/databases/{uuid}/connection | JSON uri string | status and reflected table count |
+| PUT /engine/databases/{uuid}/connection | JSON uri string | status, reflected table count in `tables`, and table/column/type map in `schema` |
 | PUT /engine/databases/{uuid}/import | Raw UTF-8 CSV, up to 1 MB | records table, columns and imported row count |
 | GET /engine/databases/{uuid}/schema | No body | dialect and permitted tables/columns/types |
 | POST /engine/databases/{uuid}/generate | JSON question string | sql, provider, requires_execution, attempts, cache |
 | POST /engine/databases/{uuid}/query | JSON sql string | columns, rows, row_count, sql, elapsed_ms |
 
 Connection and import actions require an organization administrator. Query/schema/generation require QUERY_ONLY or SCHEMA_EDIT and explicit database permissions. An admin role alone does not create a data grant.
+
+The connection and import responses contain metadata for the administrator's setup review. They contain no row values and do not create a query grant. Continue to use the separate policy-filtered GET schema endpoint for the query workspace.
 
 Generated SQL must be shown for review before live execution. Execution resolves permissions again. Request the query endpoint explicitly after user confirmation.
 

@@ -186,7 +186,7 @@ async def connect(
                 user,
                 database_id,
             )
-            return {"status": "connected", "tables": len(schema)}
+            return {"status": "connected", "tables": len(schema), "schema": schema}
     except ValueError as error:
         raise HTTPException(422, str(error))
     except (asyncpg.PostgresError, OSError, TimeoutError):

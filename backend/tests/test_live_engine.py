@@ -116,13 +116,28 @@ def test_live_postgres_round_trip(monkeypatch):
             database = await conn.fetchval(
                 "SELECT public.register_database($1,'Live test','postgres')", org
             )
+            imported = await conn.fetchval(
+                "SELECT public.register_database($1,'Imported test','sqlite')", org
+            )
+        finally:
+            await conn.close()
+        target = await asyncpg.connect(target_dsn)
+        await target.execute(
+            "CREATE TABLE public.orders(id int,amount numeric,region text); INSERT INTO public.orders VALUES(1,20,'APAC'),(2,999,'EMEA')"
+        )
+        await target.close()
+        return org, database, imported
+
+    async def grant_source_access():
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(
+                "SELECT set_config('request.jwt.claim.sub',$1,false)", str(owner)
+            )
             role = await conn.fetchval(
                 "SELECT role_id FROM public.memberships WHERE org_id=$1 AND user_id=$2",
                 org,
                 owner,
-            )
-            imported = await conn.fetchval(
-                "SELECT public.register_database($1,'Imported test','sqlite')", org
             )
             await conn.execute(
                 """SELECT public.save_permission($1,$2,$3,null,'QUERY_ONLY',
@@ -140,12 +155,6 @@ def test_live_postgres_round_trip(monkeypatch):
             )
         finally:
             await conn.close()
-        target = await asyncpg.connect(target_dsn)
-        await target.execute(
-            "CREATE TABLE public.orders(id int,amount numeric,region text); INSERT INTO public.orders VALUES(1,20,'APAC'),(2,999,'EMEA')"
-        )
-        await target.close()
-        return org, database, imported
 
     org, database, imported = asyncio.run(setup())
     monkeypatch.setenv("MORPHY_SUPABASE_URL", "http://127.0.0.1:55421")
@@ -164,6 +173,26 @@ def test_live_postgres_round_trip(monkeypatch):
             path = f"/api/engine/databases/{database}"
             response = client.put(path + "/connection", json={"uri": target_dsn})
             assert response.status_code == 200, response.text
+            assert response.json() == {
+                "status": "connected",
+                "tables": 1,
+                "schema": {"orders": {"id": "int4", "amount": "numeric", "region": "text"}},
+            }
+            csv_path = f"/api/engine/databases/{imported}"
+            uploaded = client.put(
+                csv_path + "/import",
+                content=b"region,customer,email\nAPAC,001,a@example.test\nEU,002,b@example.test",
+            )
+            assert uploaded.status_code == 200, uploaded.text
+            assert uploaded.json() == {
+                "table": "records",
+                "columns": ["region", "customer", "email"],
+                "rows": 2,
+            }
+            for source in (path, csv_path):
+                assert client.get(source + "/schema").status_code == 403
+                assert client.post(source + "/query", json={"sql": "SELECT 1"}).status_code == 403
+            asyncio.run(grant_source_access())
             assert client.get(path + "/schema").json()["tables"] == {
                 "orders": {"id": "int4", "amount": "numeric", "region": "text"}
             }
@@ -202,12 +231,6 @@ def test_live_postgres_round_trip(monkeypatch):
                 ).status_code
                 == 422
             )
-            csv_path = f"/api/engine/databases/{imported}"
-            uploaded = client.put(
-                csv_path + "/import",
-                content=b"region,customer,email\nAPAC,001,a@example.test\nEU,002,b@example.test",
-            )
-            assert uploaded.status_code == 200, uploaded.text
             assert client.get(csv_path + "/schema").json()["tables"] == {
                 "records": {"customer": "TEXT", "region": "TEXT"}
             }
