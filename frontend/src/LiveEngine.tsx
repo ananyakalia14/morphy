@@ -18,6 +18,8 @@ type Generated = {
   attempts?: number;
   cache?: "hit" | "miss";
 };
+type Schema = Record<string, Record<string, string>>;
+const overviewPrompt = /^(?:what is this (?:data|dataset|database|table) about|describe this (?:dataset|database|table)|give me an overview of this (?:dataset|database|table))[?.!]*$/i;
 
 export const SESSION_EXPIRED = "morphy:session-expired";
 
@@ -122,9 +124,10 @@ export function LiveEngine({
   const [uri, setUri] = useState(""),
     [question, setQuestion] = useState(""),
     [sql, setSql] = useState("");
-  const [schema, setSchema] = useState<Record<string, Record<string, string>>>({}),
+  const [schema, setSchema] = useState<Schema>({}),
     [filter, setFilter] = useState("");
   const [result, setResult] = useState<Result>(),
+    [overview, setOverview] = useState<Schema>(),
     [gen, setGen] = useState<Generated>(),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -161,6 +164,7 @@ export function LiveEngine({
     setSchema({});
     setUri("");
     setResult(undefined);
+    setOverview(undefined);
     setGen(undefined);
     setSql(initial?.database === database ? initial.sql : "");
     setError("");
@@ -183,6 +187,17 @@ export function LiveEngine({
       if (alive()) setBusy(false);
     }
   }
+  function showOverview() {
+    void run(async (alive) => {
+      setOverview(undefined);
+      setResult(undefined);
+      setGen(undefined);
+      const data = await engine<{ tables: Schema }>(database, "schema");
+      if (alive()) setOverview(data.tables);
+    }, true);
+  }
+  const wantsOverview = overviewPrompt.test(question.trim().replace(/\s+/g, " "));
+  const overviewTables = overview && Object.entries(overview);
   const csvSource = sources.find((source) => source.id === database)?.dialect === "sqlite";
   const f = filter.trim().toLowerCase();
   const visible = Object.entries(schema).filter(
@@ -223,6 +238,7 @@ export function LiveEngine({
                       if (!alive()) return;
                       setSchema({});
                       setResult(undefined);
+                      setOverview(undefined);
                       setStatus(
                         "Imported " + saved.rows + " rows into records. Configure allowed columns in Roles & access: " + saved.columns.join(", "),
                       );
@@ -242,6 +258,7 @@ export function LiveEngine({
                     await engine(database, "connection", { uri: value }, "PUT");
                     if (!alive()) return;
                     setUri("");
+                    setOverview(undefined);
                     setStatus("Connection verified and encrypted on the server.");
                   }, true);
                 }}
@@ -313,7 +330,12 @@ export function LiveEngine({
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (wantsOverview) {
+                showOverview();
+                return;
+              }
               void run(async (alive) => {
+                setOverview(undefined);
                 const generated = await engine<Generated>(database, "generate", { question });
                 if (!alive()) return;
                 setSql(generated.sql);
@@ -325,10 +347,42 @@ export function LiveEngine({
           >
             <label>
               Ask about this database
-              <input required maxLength={2000} disabled={busy} value={question} onChange={(e) => setQuestion(e.target.value)} />
+              <input
+                required
+                maxLength={2000}
+                disabled={busy}
+                value={question}
+                aria-describedby="live-question-privacy"
+                onChange={(e) => setQuestion(e.target.value)}
+              />
             </label>
-            <button disabled={busy || !question.trim()}>Generate with Ollama ↗</button>
+            <small id="live-question-privacy">
+              Dataset overviews use schema metadata only. SQL generation sends your question as typed to Ollama.
+            </small>
+            <button type="submit" disabled={busy || !question.trim()}>
+              {wantsOverview ? "Show dataset overview ↗" : "Generate with Ollama ↗"}
+            </button>
+            {!wantsOverview && (
+              <button type="button" disabled={busy} onClick={showOverview}>Show dataset overview ↗</button>
+            )}
           </form>
+          {overviewTables && (
+            <section aria-labelledby="dataset-overview">
+              <h3 id="dataset-overview">Dataset overview</h3>
+              <p role="status">Based on permitted table and column names only.</p>
+              {overviewTables.length ? (
+                <ul>
+                  {overviewTables.map(([table, columns]) => (
+                    <li key={table}>
+                      <strong>{table}</strong> · {Object.keys(columns).join(", ")}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Your current permissions show no tables or columns for this source.</p>
+              )}
+            </section>
+          )}
           {gen && (
             <p className="gen-meta" role="status">
               {gen.cache === "hit" ? (
@@ -362,6 +416,7 @@ export function LiveEngine({
                 disabled={busy || !sql.trim()}
                 onClick={() =>
                   void run(async (alive) => {
+                    setOverview(undefined);
                     setResult(undefined);
                     const r = await engine<Result>(database, "query", { sql });
                     if (alive()) setResult(r);
