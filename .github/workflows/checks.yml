@@ -41,6 +41,8 @@ jobs:
         working-directory: backend
       - run: python -m pip install -e ./cli
       - run: morphy --help
+      - run: sq --help
+      - run: python -m pytest cli/tests -q
       - run: python -m compileall -q cli/morphy_cli backend/app
 
   sql-policies:

@@ -14,6 +14,7 @@
 - Redis exact-question draft cache, tested against Redis in CI for round-trip storage, policy scoping and 24-hour expiration settings.
 - Offline MiniLM anchors and authorized foreign-key graph expansion.
 - SQL/result inspection, session history, activity viewer and live-query CLI.
+- Full interactive terminal CLI (morphy & sq) with prompt-toolkit, GoTrue Supabase authentication, OS keyring credential storage, context switching, connection & CSV management, profile editing, invitation revocation, saved queries, and terminal dashboard.
 - Combined local startup script, stable encryption key and repeatable migrations.
 
 ## Implemented with runtime verification still open
@@ -24,11 +25,11 @@
 ## Original requirements still requiring implementation
 - MySQL, MariaDB, Snowflake, BigQuery, DuckDB, ClickHouse, MongoDB and Parquet connectors.
 - Redis HNSW semantic SQL cache, Cuckoo-filter username acceleration and Redis Streams audit worker.
-- Dashboard layout/chart configuration and viewer-facing website/terminal integration.
+- Dashboard layout/chart configuration and viewer-facing website/terminal integration (CLI integration completed with /dashboard).
 - Frontier-provider benchmark mode and opt-in egress controls.
 - Official Spider/BIRD dataset runs, official scoring and representative performance measurements.
 - Full-screen production database connection wizard and interactive terminal autocomplete.
-- Website/terminal settings for profile editing and invitation withdrawal/reissue.
+- Website/terminal settings for profile editing and invitation withdrawal/reissue (CLI commands completed with /profile edit and /withdraw).
 - Production packaging, deployment, key rotation, operational monitoring and recovery validation.
 
 The supported live PostgreSQL query subset is SELECTs, joins, aggregates, non-recursive CTEs, nested queries and set operations using a limited function set and public base tables. CSV import creates a records table with TEXT fields. The graph retriever uses authorized foreign keys and bounded anchors. Benchmark leaderboard and latency targets remain unmeasured.
