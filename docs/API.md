@@ -24,7 +24,9 @@ The connection and import responses contain metadata for the administrator's set
 
 Generated SQL must be shown for review before live execution. Execution resolves permissions again. Request the query endpoint explicitly after user confirmation.
 
-For simple highest/lowest salary questions on imported sources, the engine can return a local draft with provider `morphy-template`. The draft uses only permitted identifiers and ranks finite decimal values numerically. It returns ties and skips blank or nonnumeric pay values when executed. This path sends no prompt or rows to the model.
+Common questions on imported sources can return a local draft with provider `morphy-template`. Examples include `average age by city`, `count records by department`, `bottom 3 by revenue` and `who earns the lowest?`. The engine resolves permitted column names and common synonyms. Numeric operations skip blank or nonnumeric fields. Highest and lowest person queries return ties. This path sends no prompt or rows to the model.
+
+For other imported-source questions, the model receives the typed question and pseudonymized schema hints derived from column names. It receives no row values. Candidate SQL is validated for the SQLite target before being returned or cached.
 
 The query response uses parallel columns and rows arrays. Preserve null values. PostgreSQL numeric/date/UUID values pass through FastAPI's JSON encoding. Avoid assuming every cell is a string.
 
