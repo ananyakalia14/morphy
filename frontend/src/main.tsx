@@ -115,6 +115,7 @@ function Auth({ initial, back }: { initial: string; back: () => void }) {
   function submit(e: FormEvent) {
     e.preventDefault();
     void run(async () => {
+      setNotice("");
       if (!db)
         throw Error(
           "Start local Supabase with start-local.ps1 to enable accounts.",
@@ -130,7 +131,15 @@ function Auth({ initial, back }: { initial: string; back: () => void }) {
               },
             })
           : await db.auth.signInWithPassword({ email, password });
-      if (res.error) throw res.error;
+      if (res.error) {
+        if (res.error.code === "over_email_send_rate_limit" || /email rate limit exceeded/i.test(res.error.message)) {
+          throw Error("We couldn’t send the confirmation email because the email limit was reached. Wait before trying again.");
+        }
+        if (res.error.code === "email_address_not_authorized") {
+          throw Error("Signup emails are unavailable for this address. A MORPHY administrator needs to finish configuring email delivery.");
+        }
+        throw res.error;
+      }
       if (!res.data.session)
         setNotice("Check your email to finish signing in.");
     });
@@ -212,9 +221,10 @@ function Auth({ initial, back }: { initial: string; back: () => void }) {
             ))}
           {busy && <AnimalMorphLoader label="Signing in" />}
           <Notice error={error} />
-          <p role="status">{notice}</p>
+          {!error && notice && <p role="status">{notice}</p>}
           <button
             className="link"
+            disabled={busy}
             onClick={() => {
               setMode(mode === "signup" ? "signin" : "signup");
               setNotice("");
