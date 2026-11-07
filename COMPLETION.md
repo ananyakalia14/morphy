@@ -7,7 +7,7 @@
 - Neo-brutalist web frontend and six-animal animation package.
 - Supabase schema, authenticated RPCs, organization ownership, invitations and custom roles.
 - Role and user policy intersections, table/column allowlists and equality row predicates.
-- PostgreSQL connections and encrypted CSV imports with read-only execution.
+- PostgreSQL connections, encrypted CSV imports and optional bounded Parquet imports with read-only execution.
 - Non-recursive CTEs, nested SELECTs, correlated EXISTS and UNION/INTERSECT/EXCEPT with source-level policy filtering.
 - Real local Qwen inference, semantic pseudonyms, AST restoration and bounded correction.
 - Local Spider/BIRD-style execution-agreement runner with read-only SQLite and explicit error/exclusion counts.
@@ -23,7 +23,7 @@
 - Updated combined launcher requires a working Docker engine before its Supabase stage can be exercised.
 
 ## Original requirements still requiring implementation
-- MySQL, MariaDB, Snowflake, BigQuery, DuckDB, ClickHouse, MongoDB and Parquet connectors.
+- MySQL, MariaDB, Snowflake, BigQuery, DuckDB, ClickHouse, MongoDB connectors.
 - Redis HNSW semantic SQL cache, Cuckoo-filter username acceleration and Redis Streams audit worker.
 - Dashboard layout/chart configuration and viewer-facing website/terminal integration (CLI integration completed with /dashboard).
 - Frontier-provider benchmark mode and opt-in egress controls.

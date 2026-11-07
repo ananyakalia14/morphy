@@ -13,7 +13,7 @@ from .security import check_uri, encrypt_uri, decrypt_uri, compile_query
 from .postgres import connection, reflect
 from .nl2sql import draft
 from .cache import generation_key, read_draft, store_draft
-from .imported import read_csv, execute_csv
+from .imported import read_csv, execute_csv, parquet_to_csv
 from starlette.concurrency import run_in_threadpool
 from fastapi import Request
 import sqlite3
@@ -414,13 +414,20 @@ async def import_csv(
     contents = bytearray()
     async for chunk in request.stream():
         if len(contents) + len(chunk) > 1_048_576:
-            raise HTTPException(413, "Choose a UTF-8 CSV up to 1 MB.")
+            raise HTTPException(413, "Choose a CSV or Parquet file up to 1 MB.")
         contents.extend(chunk)
     conn = await control(config)
     try:
         async with conn.transaction():
             row = await require_admin(conn, database_id, user, "sqlite")
-            text = contents.decode("utf-8-sig")
+            parquet = request.headers.get("content-type", "").split(";")[0].strip().lower() == "application/vnd.apache.parquet"
+            if parquet:
+                try:
+                    text = await run_in_threadpool(parquet_to_csv, bytes(contents))
+                except ImportError:
+                    raise HTTPException(503, "Install the server's requirements-parquet.txt to enable Parquet imports.")
+            else:
+                text = contents.decode("utf-8-sig")
             reflected, records = await run_in_threadpool(read_csv, text)
             blob = encrypt_uri(text, config.encryption_key, database_id)
             await conn.execute(
@@ -433,9 +440,10 @@ async def import_csv(
                 blob,
             )
             await conn.execute(
-                "INSERT INTO public.audit_events(org_id,actor_id,action,subject_id) VALUES($1,$2,'csv.imported',$3)",
+                "INSERT INTO public.audit_events(org_id,actor_id,action,subject_id) VALUES($1,$2,$3,$4)",
                 row["org_id"],
                 user,
+                "parquet.imported" if parquet else "csv.imported",
                 database_id,
             )
             return {

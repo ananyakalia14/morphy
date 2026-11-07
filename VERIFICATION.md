@@ -71,3 +71,8 @@ Hosted signup testing found a pre-existing on_auth_user_created trigger insertin
   - Formatted text tables, JSON output (`--json`), and RFC-4180 CSV export (`--csv`) validated.
   - Addressed integration issue with exit codes: mapped engine/network connectivity errors (`status_code >= 500`) to exit code `2`, query/policy failures to `1`, cancellation to `130`, and clean queries to `0`.
 - All 59 CLI tests passed (`python -m pytest cli/tests -v`), backend tests passed (`30 passed, 3 skipped`), and frontend built cleanly in 4.98s (`npm run build`).
+
+
+Hosted integration follow-up: two disposable accounts signed in through GoTrue. Public Data API calls verified separate organizations, invitations, saved queries and dashboards. The local engine verified their real bearer tokens and applied APAC/EMEA row restrictions. Chrome showed totals 20 and 999 for the respective accounts and removed the result after logout. The merged CLI HTTP client returned the owner result and denied the VIEW_ONLY arbitrary query. Both test accounts, organizations, imported records and local session fixtures were deleted afterwards. Public engine deployment remains blocked by Vercel team access.
+
+Parquet import: six normalization/rejection tests and the PostgreSQL-backed API round trip pass. Full backend run has 38 passes with only the Redis runtime check skipped locally. CI installs the optional reader for both backend and PostgreSQL checks.

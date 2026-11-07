@@ -9,6 +9,61 @@ from contextlib import closing
 from .security import compile_query
 
 
+def parquet_to_csv(contents):
+    """Normalize bounded, flat Parquet uploads to the existing encrypted format."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    try:
+        source = pq.ParquetFile(
+            pa.BufferReader(contents),
+            thrift_string_size_limit=1_048_576,
+            thrift_container_size_limit=65536,
+        )
+        metadata = source.metadata
+        if metadata.num_rows > 20000 or not 1 <= metadata.num_columns <= 64:
+            raise ValueError("Parquet limits are 20,000 rows and 1–64 columns.")
+        expanded = sum(
+            metadata.row_group(i).total_byte_size
+            for i in range(metadata.num_row_groups)
+        )
+        if expanded > 16_777_216:
+            raise ValueError("Parquet expanded data must fit within 16 MB.")
+        for field in source.schema_arrow:
+            kind = field.type
+            if not (
+                pa.types.is_string(kind)
+                or pa.types.is_integer(kind)
+                or pa.types.is_boolean(kind)
+                or pa.types.is_floating(kind)
+                or pa.types.is_decimal(kind)
+                or pa.types.is_date(kind)
+                or pa.types.is_timestamp(kind)
+                or pa.types.is_null(kind)
+            ):
+                raise ValueError(
+                    "Use flat text, numeric, boolean, date or timestamp columns."
+                )
+        output = io.StringIO(newline="")
+        writer = csv.writer(output)
+        writer.writerow(source.schema_arrow.names)
+        for batch in source.iter_batches(batch_size=256, use_threads=False):
+            for row in zip(*(column.to_pylist() for column in batch.columns)):
+                values = ["" if value is None else str(value) for value in row]
+                if any(len(value) > 16384 for value in values):
+                    raise ValueError("Parquet values must fit within 16 KB.")
+                writer.writerow(values)
+                if output.tell() > 1_048_576:
+                    raise ValueError("Parquet normalized CSV must fit within 1 MB.")
+        text = output.getvalue()
+        if len(text.encode("utf-8")) > 1_048_576:
+            raise ValueError("Parquet normalized CSV must fit within 1 MB.")
+        read_csv(text)
+        return text
+    except (pa.ArrowException, OSError) as error:
+        raise ValueError("Invalid or unsupported Parquet file.") from error
+
+
 def read_csv(contents):
     reader = csv.reader(io.StringIO(contents, newline=""), strict=True)
     try:

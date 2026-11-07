@@ -41,7 +41,7 @@ export async function engine<T>(
         method: body || fullPath ? method : "GET",
         headers: {
           Authorization: "Bearer " + data.session.access_token,
-          "Content-Type": body instanceof File ? "text/csv" : "application/json",
+          "Content-Type": body instanceof File ? (body.name.toLowerCase().endsWith(".parquet") ? "application/vnd.apache.parquet" : "text/csv") : "application/json",
         },
         body: body instanceof File ? body : body ? JSON.stringify(body) : null,
         signal: AbortSignal.timeout(path === "generate" ? 195000 : 75000),
@@ -208,17 +208,17 @@ export function LiveEngine({
           </label>
           {admin && csvSource && (
             <label>
-              Import or replace CSV (UTF-8, up to 1 MB)
+              Import or replace CSV / Parquet (up to 1 MB)
               <input
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,.parquet,text/csv,application/vnd.apache.parquet"
                 disabled={busy}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.target.value = "";
                   if (file)
                     void run(async (alive) => {
-                      if (file.size > 1048576) throw Error("Choose a CSV up to 1 MB.");
+                      if (file.size > 1048576) throw Error("Choose a CSV or Parquet file up to 1 MB.");
                       const saved = await engine<{ rows: number; columns: string[] }>(database, "import", file, "PUT");
                       if (!alive()) return;
                       setSchema({});

@@ -227,6 +227,32 @@ def test_live_postgres_round_trip(monkeypatch):
             assert client.post(
                 csv_path + "/query", json={"sql": "SELECT customer FROM records"}
             ).json()["rows"] == [["001"]]
+            import importlib.util
+
+            if importlib.util.find_spec("pyarrow"):
+                import io
+                import pyarrow as pa
+                import pyarrow.parquet as pq
+
+                data = io.BytesIO()
+                pq.write_table(
+                    pa.table({"region": ["APAC", "EU"], "customer": ["001", "002"]}),
+                    data,
+                )
+                headers = {"Content-Type": "application/vnd.apache.parquet"}
+                parquet = client.put(
+                    csv_path + "/import", content=data.getvalue(), headers=headers
+                )
+                assert parquet.status_code == 200, parquet.text
+                assert (
+                    client.put(
+                        csv_path + "/import", content=b"bad", headers=headers
+                    ).status_code
+                    == 422
+                )
+                assert client.post(
+                    csv_path + "/query", json={"sql": "SELECT customer FROM records"}
+                ).json()["rows"] == [["001"]]
             current_user[0] = outsider
             assert client.put(csv_path + "/import", content=b"id\n1").status_code == 403
             assert (
