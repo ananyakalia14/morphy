@@ -89,3 +89,10 @@ Apply migration 005. Call these Supabase RPCs with the signed-in session:
 
 Direct profile and invitation writes remain disallowed. Invitation actions write audit events. Profile editing does not alter database permissions. Frontend and CLI account/settings screens must call these RPCs; no new engine HTTP endpoints are required.
 
+
+
+## Optional Parquet import
+
+Install `backend/requirements-parquet.txt` on the engine. PUT a raw file to `/engine/databases/{id}/import` with Content-Type `application/vnd.apache.parquet`. The target must be a registered SQLite import and the caller an organization administrator. Missing dependencies return 503. Invalid files return 422 and leave the previous import intact.
+
+Limits are 1 MB per upload, 20,000 rows, 64 flat columns and 16 MB declared expanded data. Strings, numbers, booleans, dates and timestamps are supported. Nested and binary fields are rejected. Data is normalized into the existing encrypted CSV-backed records table with TEXT fields and the same column-name, field-size and normalized 1 MB limits. Empty strings and nulls become SQL NULL. Query and dashboard permissions use the existing engine checks.

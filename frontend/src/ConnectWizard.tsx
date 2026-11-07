@@ -8,7 +8,7 @@ type Tables = Record<string, Record<string, string>>;
 
 const STAGES: Record<Kind, string[]> = {
   postgres: ["Registering source", "Testing connection", "Discovering tables"],
-  sqlite: ["Registering source", "Importing CSV", "Reading columns"],
+  sqlite: ["Registering source", "Importing file", "Reading columns"],
 };
 
 export function ConnectWizard({
@@ -35,9 +35,11 @@ export function ConnectWizard({
   function pickFile(f: File | undefined) {
     setError("");
     if (!f) return;
-    if (f.size > 1048576) return setError("Choose a CSV up to 1 MB.");
+    if (f.size > 1048576) return setError("Choose a CSV or Parquet file up to 1 MB.");
     setFile(f);
-    if (!name) setName(f.name.replace(/\.csv$/i, ""));
+    if (!name) setName(f.name.replace(/\.(csv|parquet)$/i, ""));
+    setPreview([]);
+    if (f.name.toLowerCase().endsWith(".parquet")) return;
     void f
       .slice(0, 4000)
       .text()
@@ -160,7 +162,7 @@ export function ConnectWizard({
               setStep("details");
             }}
           >
-            <b>CSV import</b>
+            <b>CSV / Parquet import</b>
             <span>Upload one file, up to 1 MB and 20,000 rows.</span>
           </button>
           {["MySQL", "MongoDB", "Snowflake", "BigQuery"].map((n) => (
@@ -214,10 +216,10 @@ export function ConnectWizard({
                 pickFile(e.dataTransfer.files[0]);
               }}
             >
-              {file ? file.name : "Drop a UTF-8 CSV here or click to choose"}
+              {file ? file.name : "Drop a CSV or Parquet file here or click to choose"}
               <input
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,.parquet,text/csv,application/vnd.apache.parquet"
                 onChange={(e) => pickFile(e.target.files?.[0])}
               />
             </label>
@@ -256,7 +258,7 @@ export function ConnectWizard({
               className="primary"
               disabled={kind === "sqlite" && !file}
             >
-              {error ? "Try again" : kind === "postgres" ? "Verify & connect" : "Import CSV"}
+              {error ? "Try again" : kind === "postgres" ? "Verify & connect" : "Import file"}
             </button>
           </div>
         </form>
