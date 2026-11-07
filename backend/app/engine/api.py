@@ -13,7 +13,7 @@ from .security import check_uri, encrypt_uri, decrypt_uri, compile_query
 from .postgres import connection, reflect
 from .nl2sql import draft
 from .cache import generation_key, read_draft, store_draft
-from .imported import read_csv, execute_csv, parquet_to_csv
+from .imported import read_csv, execute_csv, parquet_to_csv, salary_rank_sql
 from starlette.concurrency import run_in_threadpool
 from fastapi import Request
 import sqlite3
@@ -359,6 +359,23 @@ async def generate(
             """)
     try:
         dialect = "sqlite" if kind == "csv-v1" else "postgres"
+        if kind == "csv-v1":
+            columns = set(reflected["records"]).intersection(
+                policy["table_columns"].get("records", [])
+            )
+            try:
+                sql = salary_rank_sql(payload.question, columns)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+            if sql is not None:
+                compile_query(sql, reflected, policy, dialect=dialect)
+                return {
+                    "sql": sql,
+                    "provider": "morphy-template",
+                    "requires_execution": True,
+                    "attempts": 0,
+                    "cache": "miss",
+                }
         key = generation_key(
             database_id, payload.question, config.ollama_model, reflected, policy, edges
         )

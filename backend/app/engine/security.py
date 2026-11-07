@@ -108,11 +108,12 @@ def compile_query(sql, schema, policy, dialect="postgres"):
     for table in sources:
         if table.name not in allowed or table.db or table.catalog:
             raise PermissionError("The query references a table outside your policy.")
+    functions = FUNCTIONS | {"morphy_number"} if dialect == "sqlite" else FUNCTIONS
     for f in tree.find_all(exp.Func):
         if isinstance(f, (exp.And, exp.Or, exp.Exists)):
             continue
         name = f.name if isinstance(f, exp.Anonymous) else f.sql_name()
-        if name.lower() not in FUNCTIONS:
+        if name.lower() not in functions:
             raise ValueError("The query uses an unsupported function.")
     tree = qualify(tree, dialect=dialect, schema=allowed, validate_qualify_columns=True)
     for table in physical_tables(tree):
