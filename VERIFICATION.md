@@ -59,20 +59,11 @@ Lovable integration (2026-11-07): ported src/morphy from morphy-web-experience c
 
 Hosted signup testing found a pre-existing on_auth_user_created trigger inserting a nonexistent profiles.full_name column. Migration 006 removes only the matching legacy handle_new_user trigger. The CI fixture reproduces this trigger so fresh migration checks exercise its removal. Real Supabase password authentication now succeeds for two disposable accounts.
 
-## CLI Hosted & Live Engine Verification (7 November 2026)
-- Connected and verified against the live hosted Supabase project (`https://hkotykyiksedpuxcmfie.supabase.co`) and running local engine (`http://127.0.0.1:8000`).
-- Token refresh verified: restored real authenticated session (`aceryzen118@gmail.com`), verified GoTrue token TTL checks and refresh grant type (`refresh_token`).
-- Real server-side logout verified: `POST /auth/v1/logout` executed against GoTrue, OS keyring (`morphy-cli`) and local fallback files cleared, and shell memory context (`ctx.last_result`, active org/db IDs) wiped to prevent session data leakage into `/json` or `/export`.
-- Account switching verified: authenticating with a new user resets previous session context and invalidates prior caches.
-- Permissions and revocation verified: queried effective permissions via `public.effective_permission` and verified policy revocation via `public.save_permission` (`level='NONE'`) and `public.revoke_invitation`. Added `/permissions` and `/perm-revoke` commands to CLI shell.
-- Real saved dashboard & panel rendering verified: created real dashboard (`38ef0eaf-6a00-4393-b1d5-cf8d9ed94b73`, "Executive Revenue Dashboard") and panel (`65677a2d-50d8-48a0-9454-0d1c1715212e`, "APAC Revenue") in Supabase control plane under `TEST_001` organization. Added `/dashboards`, `/dashboard [render <id>]`, `/dashboard-create`, `/dashboard-add` commands to the interactive shell and integrated `render_panel` with engine endpoint `/api/engine/dashboards/{id}/panels/{query_id}/render`.
-- Cross-platform installation and scripting verified:
-  - Both `morphy` and `sq` console entrypoints verified on Windows, macOS, and Linux.
-  - Formatted text tables, JSON output (`--json`), and RFC-4180 CSV export (`--csv`) validated.
-  - Addressed integration issue with exit codes: mapped engine/network connectivity errors (`status_code >= 500`) to exit code `2`, query/policy failures to `1`, cancellation to `130`, and clean queries to `0`.
-- All 59 CLI tests passed (`python -m pytest cli/tests -v`), backend tests passed (`30 passed, 3 skipped`), and frontend built cleanly in 4.98s (`npm run build`).
-
-
 Hosted integration follow-up: two disposable accounts signed in through GoTrue. Public Data API calls verified separate organizations, invitations, saved queries and dashboards. The local engine verified their real bearer tokens and applied APAC/EMEA row restrictions. Chrome showed totals 20 and 999 for the respective accounts and removed the result after logout. The merged CLI HTTP client returned the owner result and denied the VIEW_ONLY arbitrary query. Both test accounts, organizations, imported records and local session fixtures were deleted afterwards. Public engine deployment remains blocked by Vercel team access.
 
 Parquet import: six normalization/rejection tests and the PostgreSQL-backed API round trip pass. Full backend run has 38 passes with only the Redis runtime check skipped locally. CI installs the optional reader for both backend and PostgreSQL checks.
+
+
+Production deployment: Vercel serves the web app at https://morphy-web.vercel.app and the FastAPI engine at https://morphy-engine.vercel.app. The same-origin `/api` rewrite returns a healthy response. Two real hosted Supabase sessions were tested with CSV import, tenant isolation, invitation acceptance and separate dashboard row policies. Chrome showed 20 for the owner and 999 for the viewer. Revoking the viewer grant cleared the result on refresh, and signing out removed workspace results for both accounts. Disposable accounts, organizations and local token fixtures were removed. Engine request without a bearer token returned 401.
+
+Local Qwen synthetic execution smoke run: 3/3 correct. This is not an official Spider/BIRD score. Hosted generation requires a reachable model provider. Optional Parquet and Redis are not configured in the deployed engine.

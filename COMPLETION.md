@@ -19,7 +19,7 @@
 
 ## Implemented with runtime verification still open
 - Full local Supabase account, OAuth and Storage journeys. Docker's Linux engine currently cannot start on this machine.
-- Organization UI using live Supabase sessions. Database/API tests use injected identities and real PostgreSQL fixtures.
+- Hosted email confirmation, OAuth, avatar Storage and the full onboarding form journey. Two-account dashboard and logout checks passed using real Supabase sessions.
 - Updated combined launcher requires a working Docker engine before its Supabase stage can be exercised.
 
 ## Original requirements still requiring implementation
@@ -30,6 +30,6 @@
 - Official Spider/BIRD dataset runs, official scoring and representative performance measurements.
 - Full-screen production database connection wizard and interactive terminal autocomplete.
 - Website/terminal settings for profile editing and invitation withdrawal/reissue (CLI commands completed with /profile edit and /withdraw).
-- Production packaging, deployment, key rotation, operational monitoring and recovery validation.
+- Configure production inference, optional Parquet and Redis services. Add key rotation, monitoring and recovery validation.
 
 The supported live PostgreSQL query subset is SELECTs, joins, aggregates, non-recursive CTEs, nested queries and set operations using a limited function set and public base tables. CSV import creates a records table with TEXT fields. The graph retriever uses authorized foreign keys and bounded anchors. Benchmark leaderboard and latency targets remain unmeasured.
