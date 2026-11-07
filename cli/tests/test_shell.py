@@ -411,6 +411,105 @@ class TestHandleCommand:
             result = _handle_command(ctx, "/ask Total revenue")
         assert "11650" in result
 
+    def test_account_isolation_logout_clears_result(self, tmp_path):
+        ctx = create_test_context()
+        _handle_command(ctx, "/sql SELECT 1")
+        assert ctx.last_result is not None
+
+        # Log out
+        res = _handle_command(ctx, "/logout")
+        assert "Signed out" in res
+        assert ctx.last_result is None
+
+        # Verify /json does not expose previous account rows
+        json_res = _handle_command(ctx, "/json")
+        assert "No previous query result to display" in json_res
+        assert "11650" not in json_res
+
+        # Verify /export does not write previous account rows
+        out_csv = tmp_path / "leaked.csv"
+        export_res = _handle_command(ctx, f"/export {out_csv}")
+        assert "No previous query result to export" in export_res
+        assert not out_csv.exists()
+
+    def test_workspace_isolation_clears_result(self):
+        ctx = create_test_context()
+        _handle_command(ctx, "/sql SELECT 1")
+        assert ctx.last_result is not None
+
+        # Switching org clears previous query result
+        with patch.object(ctx.control, "list_organizations", return_value=[{"id": "o2", "name": "OtherOrg"}]):
+            _handle_command(ctx, "/use-org OtherOrg")
+        assert ctx.last_result is None
+
+        # Re-populate and verify switching db clears previous query result
+        _handle_command(ctx, "/sql SELECT 1")
+        assert ctx.last_result is not None
+        _handle_command(ctx, "/use-db sample")
+        assert ctx.last_result is None
+
+    def test_sql_visible_before_confirmation(self, capsys):
+        ctx = create_test_context(is_live=True)
+        printed_before_input = []
+
+        def mock_input(prompt):
+            captured = capsys.readouterr()
+            printed_before_input.append(captured.out)
+            return "n"
+
+        with patch("builtins.input", side_effect=mock_input):
+            result = _handle_command(ctx, "/ask Total revenue")
+
+        assert len(printed_before_input) == 1
+        assert "SELECT sum(total) FROM orders" in printed_before_input[0]
+        assert "not executed" in result
+
+    def test_profile_edit(self):
+        ctx = create_test_context()
+        with patch.object(ctx.control, "update_profile") as mock_update:
+            res = _handle_command(ctx, "/profile edit Alice Wonderland")
+            assert "Alice Wonderland" in res
+            mock_update.assert_called_once_with("Alice Wonderland")
+
+    def test_withdraw_invitation(self):
+        ctx = create_test_context()
+        with patch.object(ctx.control, "withdraw_invitation") as mock_withdraw:
+            res = _handle_command(ctx, "/withdraw inv-456")
+            assert "inv-456 withdrawn" in res
+            mock_withdraw.assert_called_once_with("inv-456")
+
+        with patch.object(ctx.control, "withdraw_invitation") as mock_withdraw:
+            res2 = _handle_command(ctx, "/invite withdraw inv-789")
+            assert "inv-789 withdrawn" in res2
+            mock_withdraw.assert_called_once_with("inv-789")
+
+    def test_saved_queries_and_dashboard(self, tmp_path):
+        from morphy_cli.queries import QueryStore
+        q_store = QueryStore(tmp_path / "test_queries.json")
+        ctx = create_test_context()
+        ctx.queries = q_store
+
+        # Save query from last result
+        _handle_command(ctx, "/sql SELECT 1")
+        save_res = _handle_command(ctx, "/save-query my-test-query")
+        assert "saved successfully" in save_res
+
+        # List queries
+        list_res = _handle_command(ctx, "/queries")
+        assert "my-test-query" in list_res
+
+        # Run query
+        run_res = _handle_command(ctx, "/run-query my-test-query")
+        assert "11650" in run_res
+
+        # Dashboard shows query count and info
+        dash_res = _handle_command(ctx, "/dashboard")
+        assert "MORPHY DASHBOARD" in dash_res
+
+        # Delete query
+        del_res = _handle_command(ctx, "/delete-query my-test-query")
+        assert "deleted" in del_res
+
 
 # ── Client & Entrypoint ─────────────────────────────────────────────
 
@@ -435,3 +534,34 @@ class TestMainEntrypoint:
             from morphy_cli.main import main
             main()
         assert exc.value.code == 0
+
+    def test_sql_success_exit_code(self):
+        with patch("sys.argv", ["morphy", "--sql", "SELECT 1"]):
+            with patch("morphy_cli.client.MorphyClient.query", return_value={"columns": ["c"], "rows": [[1]], "row_count": 1, "elapsed_ms": 1.0}):
+                from morphy_cli.main import main
+                main()
+
+    def test_sql_engine_error_exit_code(self):
+        with patch("sys.argv", ["morphy", "--sql", "SELECT 1"]):
+            with patch("morphy_cli.client.MorphyClient.query", side_effect=EngineError(403, "denied")):
+                from morphy_cli.main import main
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 1
+
+    def test_sql_network_error_exit_code(self):
+        import httpx
+        with patch("sys.argv", ["morphy", "--sql", "SELECT 1"]):
+            with patch("morphy_cli.client.MorphyClient.query", side_effect=httpx.ConnectError("refused")):
+                from morphy_cli.main import main
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 2
+
+    def test_sql_cancellation_exit_code(self):
+        with patch("sys.argv", ["morphy", "--sql", "SELECT 1"]):
+            with patch("morphy_cli.client.MorphyClient.query", side_effect=KeyboardInterrupt):
+                from morphy_cli.main import main
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 130

@@ -16,6 +16,7 @@ from .auth import AuthError, AuthManager
 from .client import EngineError, MorphyClient
 from .completer import SlashCompleter
 from .control import ControlClient, ControlPlaneError
+from .queries import QueryStore
 from .formatting import (
     format_banner,
     format_csv,
@@ -35,7 +36,8 @@ Available commands:
     /login                     Sign in with email and password
     /logout                    Sign out and remove saved session
     /status                    Display session, active org and database context
-    /profile                   View or claim your user profile
+    /profile                   View, claim, or edit your user profile
+    /dashboard                 Display summary dashboard of workspace and queries
 
   Organization & Databases:
     /orgs                      List your organizations
@@ -52,12 +54,17 @@ Available commands:
     /invites                   List pending invitations
     /invite <username>         Invite a user to active organization
     /accept <invitation_id>    Accept a pending invitation
+    /withdraw <invitation_id>  Withdraw a pending invitation
 
-  Queries & Generation:
+  Queries & Saved Queries:
     /schema                    Display permitted tables and columns
     /examples                  List curated example questions
     /ask <question>            Generate governed SQL from natural language
     /sql <SELECT ...>          Execute read-only SQL query
+    /save-query <name> [sql]   Save current or specified SQL query
+    /queries                   List saved queries
+    /run-query <name>          Run a saved query by name
+    /delete-query <name>       Delete a saved query
     /json                      Show last query result as JSON
     /export <file.csv>         Export last query result to a CSV file
 
@@ -73,15 +80,31 @@ Tips:
 class ShellContext:
     """Holds state for the interactive shell session."""
 
-    def __init__(self, client: MorphyClient, auth_manager: AuthManager):
+    def __init__(
+        self,
+        client: MorphyClient,
+        auth_manager: AuthManager,
+        query_store: Optional[QueryStore] = None,
+    ):
         self.client = client
         self.auth = auth_manager
         self.control = ControlClient(auth_manager)
+        self.queries = query_store or QueryStore()
         self.active_org_id: Optional[str] = None
         self.active_org_name: Optional[str] = None
         self.active_db_id: Optional[str] = str(client.database) if client.database else None
         self.active_db_name: Optional[str] = None
         self.last_result: Optional[dict[str, Any]] = None
+
+    def clear_context(self, full_reset: bool = False) -> None:
+        """Clear query results and database context to prevent cross-account/workspace leakage."""
+        self.last_result = None
+        self.active_db_id = None
+        self.active_db_name = None
+        self.client.set_database(None)
+        if full_reset:
+            self.active_org_id = None
+            self.active_org_name = None
 
     def get_prompt(self) -> HTML:
         if self.active_db_id:
@@ -150,6 +173,7 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
         try:
             sess = ctx.auth.login(email, password)
             ctx.client.set_token_source(lambda: ctx.auth.get_valid_token())
+            ctx.clear_context(full_reset=True)
             return f"Successfully signed in as {sess.email}."
         except AuthError as err:
             return f"Authentication failed: {err}"
@@ -158,11 +182,7 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
     if cmd == "/logout":
         ctx.auth.logout()
         ctx.client.set_token_source(None)
-        ctx.active_org_id = None
-        ctx.active_org_name = None
-        ctx.active_db_id = None
-        ctx.active_db_name = None
-        ctx.client.set_database(None)
+        ctx.clear_context(full_reset=True)
         return "Signed out. Saved credentials cleared."
 
     # ── Organizations ───────────────────────────────────────────────────
@@ -186,12 +206,9 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
             if not matched:
                 return f"Organization '{query}' not found. Use /orgs to view available organizations."
             org = matched[0]
+            ctx.clear_context(full_reset=False)
             ctx.active_org_id = org["id"]
             ctx.active_org_name = org["name"]
-            # Reset active db when switching org
-            ctx.active_db_id = None
-            ctx.active_db_name = None
-            ctx.client.set_database(None)
             return f"Active organization set to: {ctx.active_org_name} ({ctx.active_org_id})"
         except (AuthError, ControlPlaneError) as err:
             return f"Error selecting organization: {err}"
@@ -212,9 +229,7 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
             return "Usage: /use-db <id|name|sample>"
         target = parts[1].strip()
         if target.lower() == "sample":
-            ctx.active_db_id = None
-            ctx.active_db_name = None
-            ctx.client.set_database(None)
+            ctx.clear_context(full_reset=False)
             return "Switched to sample workspace (synthetic commerce dataset)."
 
         try:
@@ -224,6 +239,7 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
                 # Direct UUID fallback
                 try:
                     uuid_val = UUID(target)
+                    ctx.clear_context(full_reset=False)
                     ctx.active_db_id = str(uuid_val)
                     ctx.active_db_name = target[:8]
                     ctx.client.set_database(uuid_val)
@@ -231,6 +247,7 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
                 except ValueError:
                     return f"Database '{target}' not found. Run /dbs to view available databases."
             db_row = matched[0]
+            ctx.clear_context(full_reset=False)
             ctx.active_db_id = str(db_row["id"])
             ctx.active_db_name = db_row["name"]
             try:
@@ -293,6 +310,16 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
         except (AuthError, ControlPlaneError) as err:
             return f"Error claiming profile: {err}"
 
+    if cmd.startswith("/profile edit"):
+        parts = cmd.split(maxsplit=2)
+        if len(parts) < 3:
+            return "Usage: /profile edit <display_name>"
+        try:
+            ctx.control.update_profile(parts[2])
+            return f"Display name updated to: {parts[2].strip()}"
+        except (AuthError, ControlPlaneError) as err:
+            return f"Error updating profile: {err}"
+
     if cmd == "/members":
         if not ctx.active_org_id:
             return "Select an active organization first with /use-org <id>"
@@ -312,6 +339,17 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
             return format_records_table(["Invitation ID", "Organization", "Status"], invites, ["id", "organization_name", "status"])
         except (AuthError, ControlPlaneError) as err:
             return f"Error listing invitations: {err}"
+
+    if cmd.startswith("/withdraw") or cmd.startswith("/invite withdraw"):
+        parts = cmd.split(maxsplit=2 if cmd.startswith("/invite withdraw") else 1)
+        inv_id = parts[-1].strip() if len(parts) > (2 if cmd.startswith("/invite withdraw") else 1) else ""
+        if not inv_id or inv_id == "withdraw":
+            return "Usage: /withdraw <invitation_id>"
+        try:
+            ctx.control.withdraw_invitation(inv_id)
+            return f"Invitation {inv_id} withdrawn successfully."
+        except (AuthError, ControlPlaneError) as err:
+            return f"Error withdrawing invitation: {err}"
 
     if cmd.startswith("/invite"):
         parts = cmd.split(maxsplit=1)
@@ -342,6 +380,87 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
             return f"Invitation {inv_id} accepted!"
         except (AuthError, ControlPlaneError) as err:
             return f"Error accepting invitation: {err}"
+
+    # ── Saved Queries & Dashboard ───────────────────────────────────────
+    if cmd.startswith("/save-query"):
+        parts = cmd.split(maxsplit=2)
+        if len(parts) < 2:
+            return "Usage: /save-query <name> [sql]"
+        name = parts[1].strip()
+        sql = parts[2].strip() if len(parts) > 2 else ""
+        if not sql:
+            if ctx.last_result and ctx.last_result.get("sql"):
+                sql = ctx.last_result["sql"]
+            else:
+                return "No previous query result to save. Specify SQL: /save-query <name> <SELECT ...>"
+        record = ctx.queries.save(name, sql, database_id=ctx.active_db_id)
+        return f"Query '{name}' saved successfully for database '{record['database_id']}'."
+
+    if cmd == "/queries":
+        saved = ctx.queries.list(database_id=ctx.active_db_id)
+        if not saved:
+            return "No saved queries found. Use /save-query <name> [sql] to save a query."
+        return format_records_table(["Name", "SQL", "Database", "Saved At"], saved, ["name", "sql", "database_id", "created_at"])
+
+    if cmd.startswith("/run-query"):
+        parts = cmd.split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: /run-query <name>"
+        name = parts[1].strip()
+        record = ctx.queries.get(name)
+        if not record:
+            return f"Saved query '{name}' not found. Use /queries to list saved queries."
+        print(f"Running saved query '{name}':\n{record['sql']}\n")
+        return _execute_sql(ctx, record["sql"])
+
+    if cmd.startswith("/delete-query"):
+        parts = cmd.split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: /delete-query <name>"
+        name = parts[1].strip()
+        if ctx.queries.delete(name):
+            return f"Saved query '{name}' deleted."
+        return f"Saved query '{name}' not found."
+
+    if cmd == "/dashboard":
+        auth_status = ctx.auth.status()
+        user_str = auth_status.get("email") or "Unauthenticated"
+        org_str = ctx.active_org_name or "(none)"
+        db_str = ctx.active_db_name or ("sample" if not ctx.active_db_id else ctx.active_db_id[:8])
+        mode_str = "LIVE (governed)" if ctx.client.is_live else "SAMPLE (synthetic)"
+
+        table_count = "unknown"
+        try:
+            schema_data = ctx.client.schema()
+            table_count = str(len(schema_data.get("tables", {})))
+        except Exception:
+            pass
+
+        saved_count = len(ctx.queries.list(database_id=ctx.active_db_id))
+        last_q = "(none)"
+        if ctx.last_result:
+            last_q = f"{ctx.last_result.get('row_count', 0)} rows in {ctx.last_result.get('elapsed_ms', 0)} ms"
+
+        dash_lines = [
+            "┌────────────────────────────────────────────────────────┐",
+            "│                   MORPHY DASHBOARD                     │",
+            "├────────────────────────────────────────────────────────┤",
+            f"│  Workspace Mode:   {mode_str:<35}│",
+            f"│  Current User:     {user_str[:35]:<35}│",
+            f"│  Active Org:       {org_str[:35]:<35}│",
+            f"│  Active Database:  {db_str[:35]:<35}│",
+            f"│  Permitted Tables: {table_count:<35}│",
+            f"│  Saved Queries:    {str(saved_count):<35}│",
+            f"│  Last Execution:   {last_q:<35}│",
+            "├────────────────────────────────────────────────────────┤",
+            "│  Quick actions:                                        │",
+            "│    /ask <prompt>       Generate governed SQL           │",
+            "│    /queries            List and manage saved queries   │",
+            "│    /dbs                Browse organization databases   │",
+            "│    /schema             Inspect table column types      │",
+            "└────────────────────────────────────────────────────────┘",
+        ]
+        return "\n".join(dash_lines)
 
     # ── Export & JSON ───────────────────────────────────────────────────
     if cmd == "/json":

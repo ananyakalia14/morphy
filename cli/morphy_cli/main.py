@@ -92,6 +92,9 @@ def main():
         except httpx.HTTPError as error:
             print(f"Network error: {error}", file=sys.stderr)
             sys.exit(2)
+        except KeyboardInterrupt:
+            print("\nCancelled.", file=sys.stderr)
+            sys.exit(130)
         finally:
             client.close()
         return
@@ -103,5 +106,6 @@ def main():
         run_repl(client, auth_manager=auth)
     except KeyboardInterrupt:
         print()
+        sys.exit(130)
     finally:
         client.close()

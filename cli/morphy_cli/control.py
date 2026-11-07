@@ -71,6 +71,20 @@ class ControlClient:
             json_body={"handle": username.strip().lower(), "full_name": display_name.strip()},
         )
 
+    def update_profile(self, display_name: str) -> None:
+        profile = self.get_profile()
+        user_id = profile.get("id") if profile else None
+        if not user_id:
+            status = self.auth.status()
+            user_id = status.get("user_id")
+        if not user_id:
+            raise ControlPlaneError("Must be authenticated with a claimed profile to edit.")
+        self._request(
+            "PATCH",
+            f"/rest/v1/profiles?id=eq.{user_id}",
+            json_body={"display_name": display_name.strip()},
+        )
+
     # --- Organizations ---
 
     def list_organizations(self) -> list[dict[str, Any]]:
@@ -136,6 +150,12 @@ class ControlClient:
             "POST",
             "/rest/v1/rpc/accept_invitation",
             json_body={"inv": invitation_id},
+        )
+
+    def withdraw_invitation(self, invitation_id: str) -> None:
+        self._request(
+            "DELETE",
+            f"/rest/v1/invitations?id=eq.{invitation_id}",
         )
 
     def find_people(self, prefix: str) -> list[dict[str, Any]]:
