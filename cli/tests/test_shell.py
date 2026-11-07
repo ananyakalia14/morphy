@@ -226,6 +226,81 @@ class TestAuthManager:
         with pytest.raises(AuthError):
             auth.login("dev@test.com", "wrong")
 
+    @patch("morphy_cli.auth.httpx.Client")
+    def test_refresh_success(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "access_token": "new-acc-789",
+            "refresh_token": "new-ref-987",
+            "expires_in": 3600,
+            "user": {"id": "uid-1", "email": "dev@test.com"},
+        }
+        mock_client.post.return_value = mock_resp
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        auth = AuthManager(supabase_url="http://127.0.0.1:54321", supabase_key="test-key")
+        auth.current_session = Session("old-acc", "old-ref", "uid-1", "dev@test.com", time.time() - 10)
+        with patch.object(auth, "_store_refresh_token") as mock_store:
+            new_sess = auth.refresh()
+            assert new_sess.access_token == "new-acc-789"
+            assert new_sess.refresh_token == "new-ref-987"
+            assert auth.current_session.access_token == "new-acc-789"
+            mock_store.assert_called_once_with("new-ref-987", new_sess)
+
+    @patch("morphy_cli.auth.httpx.Client")
+    def test_refresh_failure_clears_tokens(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = "Invalid refresh token"
+        mock_client.post.return_value = mock_resp
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        auth = AuthManager(supabase_url="http://127.0.0.1:54321", supabase_key="test-key")
+        auth.current_session = Session("old-acc", "old-ref", "uid-1", "dev@test.com", time.time() - 10)
+        with patch.object(auth, "_clear_stored_tokens") as mock_clear:
+            with pytest.raises(AuthError) as exc:
+                auth.refresh()
+            assert "Session expired" in str(exc.value)
+            assert auth.current_session is None
+            mock_clear.assert_called_once()
+
+    def test_get_valid_token_auto_refreshes_when_expired(self):
+        auth = AuthManager(supabase_url="http://127.0.0.1:54321", supabase_key="test-key")
+        # Session expired (expires_at in the past)
+        auth.current_session = Session("expired-acc", "valid-ref", "uid-1", "dev@test.com", time.time() - 100)
+        assert auth.current_session.is_expired
+
+        with patch.object(auth, "refresh") as mock_refresh:
+            def do_refresh():
+                auth.current_session = Session("fresh-acc", "fresh-ref", "uid-1", "dev@test.com", time.time() + 3600)
+                return auth.current_session
+            mock_refresh.side_effect = do_refresh
+
+            token = auth.get_valid_token()
+            mock_refresh.assert_called_once()
+            assert token == "fresh-acc"
+
+    def test_get_valid_token_uses_unexpired_token(self):
+        auth = AuthManager(supabase_url="http://127.0.0.1:54321", supabase_key="test-key")
+        auth.current_session = Session("valid-acc", "valid-ref", "uid-1", "dev@test.com", time.time() + 1800)
+        with patch.object(auth, "refresh") as mock_refresh:
+            token = auth.get_valid_token()
+            mock_refresh.assert_not_called()
+            assert token == "valid-acc"
+
+    def test_logout_clears_stored_credentials(self):
+        auth = AuthManager(supabase_url="http://127.0.0.1:54321", supabase_key="test-key")
+        auth.current_session = Session("acc", "ref", "uid-1", "dev@test.com", time.time() + 3600)
+        with patch.object(auth, "_clear_stored_tokens") as mock_clear:
+            auth.logout()
+            assert auth.current_session is None
+            mock_clear.assert_called_once()
+            status = auth.status()
+            assert status["authenticated"] is False
+
 
 # ── Control Plane ───────────────────────────────────────────────────
 
