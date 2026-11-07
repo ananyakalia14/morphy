@@ -10,6 +10,8 @@ Landing page, six-animal intro/hero, reduced motion, account forms, username cla
 
 LiveEngine.tsx uses authenticated engine endpoints from ../docs/API.md. QueryWorkbench.tsx exposes the labeled synthetic dataset and local-model questions. These flows have different authorization requirements.
 
+The live dataset overview uses permitted schema metadata to suggest a row count and a bounded preview per table. Selecting a suggestion fills the SQL editor. Execution still requires the user's action and the engine's current permission checks.
+
 ## Website checklist
 
 - [ ] Complete live Supabase onboarding verification after Docker is operational.

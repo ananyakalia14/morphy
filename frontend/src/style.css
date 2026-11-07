@@ -1120,6 +1120,8 @@ button.link{background:none;border:0;padding:0;text-decoration:underline;cursor:
 .schema-nav{display:grid;gap:8px;margin:12px 0}
 .schema-tree{list-style:none;padding:0;max-height:320px;overflow:auto;display:grid;gap:4px}
 .schema-tree ul{list-style:none;padding-left:14px}
+.overview-tables{display:grid;gap:1rem;overflow-wrap:anywhere}
+.overview-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem}
 .chip{font-size:.8em;padding:2px 8px;border-radius:999px}
 .gen-meta{display:flex;gap:8px;flex-wrap:wrap}
 .badge{font-size:.78em;padding:3px 10px;border-radius:999px;border:1px solid #0047ff;color:#0047ff}

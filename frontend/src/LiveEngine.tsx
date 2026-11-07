@@ -1,5 +1,5 @@
 const ENGINE: string = import.meta.env["VITE_ENGINE_URL"] || "/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { db, rows, type Source } from "./client";
 import { AnimalMorphLoader } from "./Motion";
 import { saveQuery } from "./Library";
@@ -20,6 +20,10 @@ type Generated = {
 };
 type Schema = Record<string, Record<string, string>>;
 const overviewPrompt = /^(?:what is this (?:data|dataset|database|table) about|describe this (?:dataset|database|table)|give me an overview of this (?:dataset|database|table))[?.!]*$/i;
+
+function sqlIdentifier(name: string) {
+  return '"' + name.replaceAll('"', '""') + '"';
+}
 
 export const SESSION_EXPIRED = "morphy:session-expired";
 
@@ -135,6 +139,7 @@ export function LiveEngine({
     [saveTitle, setSaveTitle] = useState(""),
     [retry, setRetry] = useState<(() => void) | null>(null);
   const [latest] = useState(createLatest);
+  const editor = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     let alive = true;
     setSources([]);
@@ -198,6 +203,13 @@ export function LiveEngine({
   }
   const wantsOverview = overviewPrompt.test(question.trim().replace(/\s+/g, " "));
   const overviewTables = overview && Object.entries(overview);
+  function loadSuggestedSql(suggestion: string) {
+    setSql(suggestion);
+    setGen(undefined);
+    setResult(undefined);
+    setStatus("Suggested SQL loaded for review.");
+    editor.current?.focus();
+  }
   const csvSource = sources.find((source) => source.id === database)?.dialect === "sqlite";
   const f = filter.trim().toLowerCase();
   const visible = Object.entries(schema).filter(
@@ -371,13 +383,40 @@ export function LiveEngine({
               <h3 id="dataset-overview">Dataset overview</h3>
               <p role="status">Based on permitted table and column names only.</p>
               {overviewTables.length ? (
-                <ul>
-                  {overviewTables.map(([table, columns]) => (
-                    <li key={table}>
-                      <strong>{table}</strong> · {Object.keys(columns).join(", ")}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <h4>Suggested queries</h4>
+                  <p>Choose a suggestion to load it in the SQL editor.</p>
+                  <ul className="overview-tables">
+                    {overviewTables.map(([table, columns]) => {
+                      const names = Object.keys(columns);
+                      const source = sqlIdentifier(table);
+                      const preview = names.slice(0, 3).map(sqlIdentifier).join(", ");
+                      return (
+                        <li key={table}>
+                          <div><strong>{table}</strong> · {names.join(", ")}</div>
+                          <div className="overview-actions">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-label={`Count rows in ${table}`}
+                              onClick={() => loadSuggestedSql(`SELECT COUNT(*) AS row_count FROM ${source}`)}
+                            >
+                              Count rows
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-label={`Preview up to 10 rows from ${table}`}
+                              onClick={() => loadSuggestedSql(`SELECT ${preview} FROM ${source} LIMIT 10`)}
+                            >
+                              Preview up to 10 rows
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
               ) : (
                 <p>Your current permissions show no tables or columns for this source.</p>
               )}
@@ -402,6 +441,7 @@ export function LiveEngine({
               SQL query
             </label>
             <textarea
+              ref={editor}
               id="live-sql"
               spellCheck={false}
               value={sql}
@@ -416,7 +456,6 @@ export function LiveEngine({
                 disabled={busy || !sql.trim()}
                 onClick={() =>
                   void run(async (alive) => {
-                    setOverview(undefined);
                     setResult(undefined);
                     const r = await engine<Result>(database, "query", { sql });
                     if (alive()) setResult(r);
