@@ -14,7 +14,7 @@ from .postgres import connection, reflect
 from .nl2sql import draft
 from .cache import generation_key, read_draft, store_draft
 from .imported import read_csv, execute_csv, parquet_to_csv
-from .csv_queries import analytics_sql
+from .csv_queries import ColumnClarification, analytics_sql, question_examples
 from starlette.concurrency import run_in_threadpool
 from fastapi import Request
 import sqlite3
@@ -81,6 +81,8 @@ class QueryInput(BaseModel):
 
 class QuestionInput(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
+    include_clarification: bool = False
+    require_template: bool = False
 
 
 async def authorized_target(database_id, user, config, *, viewing_panel=False):
@@ -217,6 +219,10 @@ async def schema(
     return {
         "dialect": "sqlite" if kind == "csv-v1" else "postgres",
         "tables": {t: cols for t, cols in allowed.items() if cols},
+        **(
+            {"question_examples": question_examples(allowed.get("records", {}))}
+            if kind == "csv-v1" else {}
+        ),
     }
 
 
@@ -365,7 +371,17 @@ async def generate(
                 policy["table_columns"].get("records", [])
             )
             try:
-                sql = analytics_sql(payload.question, columns)
+                sql = analytics_sql(
+                    payload.question, columns, exact_columns=payload.require_template
+                )
+            except ColumnClarification as error:
+                if payload.include_clarification:
+                    return {
+                        "kind": "clarification",
+                        "message": str(error),
+                        "choices": error.choices,
+                    }
+                raise HTTPException(422, str(error)) from error
             except ValueError as error:
                 raise HTTPException(422, str(error)) from error
             if sql is not None:
@@ -377,6 +393,10 @@ async def generate(
                     "attempts": 0,
                     "cache": "miss",
                 }
+        if payload.require_template:
+            raise HTTPException(
+                422, "That column is unavailable for this question. Ask again to refresh the choices."
+            )
         key = generation_key(
             database_id, payload.question, config.ollama_model, reflected, policy, edges
         )

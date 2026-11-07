@@ -112,3 +112,54 @@ def test_csv_salary_question_ranks_numbers_without_a_model(monkeypatch):
         denied = client.post(endpoint + "/generate", json={"question": "Who earns the lowest?"})
         assert denied.status_code == 422
         model.assert_not_awaited()
+
+
+def test_csv_clarification_choices_and_examples_follow_current_permissions(monkeypatch):
+    data = (
+        "base_salary,annual_salary,pay,city\n"
+        "10,120,99,North\n20,240,99,South"
+    )
+    policy = {
+        "mode": "QUERY_ONLY",
+        "table_columns": {"records": ["base_salary", "annual_salary", "city"]},
+        "row_rules": [{"table": "records", "column": "city", "op": "eq", "value": "North"}],
+    }
+    user, org, database = (uuid.uuid4() for _ in range(3))
+    monkeypatch.setattr(api, "authorized_target", AsyncMock(return_value=(data, policy, org, "csv-v1")))
+    model = AsyncMock(side_effect=AssertionError("This path must stay outside the model"))
+    monkeypatch.setattr(api, "draft", model)
+    monkeypatch.setattr(api, "audit_query", AsyncMock())
+    monkeypatch.setitem(app.dependency_overrides, api.identity, lambda: user)
+    monkeypatch.setitem(app.dependency_overrides, api.settings, lambda: SimpleNamespace())
+    endpoint = f"/api/engine/databases/{database}"
+    question = {"question": "What is the average pay by city?"}
+
+    with TestClient(app) as client:
+        examples = client.get(endpoint + "/schema").json()["question_examples"]
+        assert "What is the average annual_salary by city?" in examples
+        assert "North" not in str(examples) and "South" not in str(examples)
+        legacy = client.post(endpoint + "/generate", json=question)
+        assert legacy.status_code == 422 and isinstance(legacy.json()["detail"], str)
+        response = client.post(
+            endpoint + "/generate", json={**question, "include_clarification": True}
+        )
+        assert response.status_code == 200
+        clarification = response.json()
+        assert clarification["kind"] == "clarification"
+        assert [choice["column"] for choice in clarification["choices"]] == [
+            "annual_salary", "base_salary",
+        ]
+        assert "sql" not in clarification
+        selected = {
+            "question": clarification["choices"][0]["question"],
+            "require_template": True,
+        }
+        draft = client.post(endpoint + "/generate", json=selected).json()
+        assert "annual_salary" in draft["sql"]
+        api.audit_query.assert_not_awaited()
+        result = client.post(endpoint + "/query", json={"sql": draft["sql"]})
+        assert result.json()["rows"] == [["North", 120.0]]
+        policy["table_columns"]["records"].remove("annual_salary")
+        stale = client.post(endpoint + "/generate", json=selected)
+        assert stale.status_code == 422
+        model.assert_not_awaited()

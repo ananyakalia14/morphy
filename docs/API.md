@@ -28,6 +28,8 @@ Common questions on imported sources can return a local draft with provider `mor
 
 For other imported-source questions, the model receives the typed question and pseudonymized schema hints derived from column names. It receives no row values. Candidate SQL is validated for the SQLite target before being returned or cached.
 
+The permitted CSV schema response includes `question_examples`, a list of starter questions built from permitted column names. Clients may send `include_clarification: true` with a generation request. If a common CSV term matches multiple permitted columns, the response can contain `kind: "clarification"`, a `message`, and `choices` with `column` and `question` fields, instead of a SQL draft. Clients opt in to this response shape. Other clients still receive the explanatory 422. To use a choice, send its question with `require_template: true`. The engine checks the exact column against the current policy and returns a draft for review. If the choice is stale, the request returns 422.
+
 The query response uses parallel columns and rows arrays. Preserve null values. PostgreSQL numeric/date/UUID values pass through FastAPI's JSON encoding. Avoid assuming every cell is a string.
 
 ## Limits and behavior

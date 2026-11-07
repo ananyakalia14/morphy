@@ -19,6 +19,12 @@ type Generated = {
   cache?: "hit" | "miss";
 };
 type Schema = Record<string, Record<string, string>>;
+type SchemaResponse = { tables: Schema; question_examples?: string[] };
+type Clarification = {
+  kind: "clarification";
+  message: string;
+  choices: { column: string; question: string }[];
+};
 const overviewPrompt = /^(?:what is this (?:data|dataset|database|table) about|describe this (?:dataset|database|table)|give me an overview of this (?:dataset|database|table))[?.!]*$/i;
 
 function sqlIdentifier(name: string) {
@@ -114,6 +120,33 @@ export function ResultTable({ result }: { result: Result }) {
   );
 }
 
+function ResultHighlights({ result }: { result: Result }) {
+  const row = result.rows[0];
+  if (result.rows.length && (
+    result.rows.length !== 1 || !row || row.length > 6 ||
+    row.some((value) => value !== null && !(
+      typeof value === "number" || typeof value === "boolean" ||
+      (typeof value === "string" && value.length <= 100)
+    ))
+  )) return null;
+
+  return (
+    <section className="query-guidance" aria-labelledby="result-highlights">
+      <h3 id="result-highlights">Result at a glance</h3>
+      {row ? (
+        <dl className="result-summary-values">
+          {result.columns.map((column, i) => (
+            <div key={i}>
+              <dt>{column.replaceAll("_", " ")}</dt>
+              <dd>{row[i] === null ? "No value" : String(row[i])}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : <p>The query returned zero rows.</p>}
+    </section>
+  );
+}
+
 export function LiveEngine({
   org,
   admin,
@@ -131,7 +164,8 @@ export function LiveEngine({
   const [schema, setSchema] = useState<Schema>({}),
     [filter, setFilter] = useState("");
   const [result, setResult] = useState<Result>(),
-    [overview, setOverview] = useState<Schema>(),
+    [overview, setOverview] = useState<SchemaResponse>(),
+    [clarification, setClarification] = useState<Clarification>(),
     [gen, setGen] = useState<Generated>(),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -140,6 +174,11 @@ export function LiveEngine({
     [retry, setRetry] = useState<(() => void) | null>(null);
   const [latest] = useState(createLatest);
   const editor = useRef<HTMLTextAreaElement>(null);
+  const questionField = useRef<HTMLInputElement>(null);
+  const clarificationHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (clarification) clarificationHeading.current?.focus();
+  }, [clarification]);
   useEffect(() => {
     let alive = true;
     setSources([]);
@@ -170,6 +209,7 @@ export function LiveEngine({
     setUri("");
     setResult(undefined);
     setOverview(undefined);
+    setClarification(undefined);
     setGen(undefined);
     setSql(initial?.database === database ? initial.sql : "");
     setError("");
@@ -195,16 +235,39 @@ export function LiveEngine({
   function showOverview() {
     void run(async (alive) => {
       setOverview(undefined);
+      setClarification(undefined);
       setResult(undefined);
       setGen(undefined);
-      const data = await engine<{ tables: Schema }>(database, "schema");
-      if (alive()) setOverview(data.tables);
+      const data = await engine<SchemaResponse>(database, "schema");
+      if (alive()) setOverview(data);
     }, true);
   }
+  function generateQuestion(prompt: string, requireTemplate = false) {
+    void run(async (alive) => {
+      setOverview(undefined);
+      setClarification(undefined);
+      setGen(undefined);
+      setResult(undefined);
+      const reply = await engine<Generated | Clarification>(database, "generate", {
+        question: prompt,
+        include_clarification: true,
+        ...(requireTemplate ? { require_template: true } : {}),
+      });
+      if (!alive()) return;
+      if ("kind" in reply) {
+        setClarification(reply);
+        return;
+      }
+      setSql(reply.sql);
+      setGen(reply);
+      setStatus("SQL generated. Review it, then run.");
+    });
+  }
   const wantsOverview = overviewPrompt.test(question.trim().replace(/\s+/g, " "));
-  const overviewTables = overview && Object.entries(overview);
+  const overviewTables = overview && Object.entries(overview.tables);
   function loadSuggestedSql(suggestion: string) {
     setSql(suggestion);
+    setClarification(undefined);
     setGen(undefined);
     setResult(undefined);
     setStatus("Suggested SQL loaded for review.");
@@ -251,6 +314,7 @@ export function LiveEngine({
                       setSchema({});
                       setResult(undefined);
                       setOverview(undefined);
+                      setClarification(undefined);
                       setStatus(
                         "Imported " + saved.rows + " rows into records. Configure allowed columns in Roles & access: " + saved.columns.join(", "),
                       );
@@ -271,6 +335,7 @@ export function LiveEngine({
                     if (!alive()) return;
                     setUri("");
                     setOverview(undefined);
+                    setClarification(undefined);
                     setStatus("Connection verified and encrypted on the server.");
                   }, true);
                 }}
@@ -346,26 +411,22 @@ export function LiveEngine({
                 showOverview();
                 return;
               }
-              void run(async (alive) => {
-                setOverview(undefined);
-                const generated = await engine<Generated>(database, "generate", { question });
-                if (!alive()) return;
-                setSql(generated.sql);
-                setGen(generated);
-                setResult(undefined);
-                setStatus("SQL generated. Review it, then run.");
-              });
+              generateQuestion(question);
             }}
           >
             <label>
               Ask about this database
               <input
+                ref={questionField}
                 required
                 maxLength={2000}
                 disabled={busy}
                 value={question}
                 aria-describedby="live-question-privacy"
-                onChange={(e) => setQuestion(e.target.value)}
+                onChange={(e) => {
+                  setQuestion(e.target.value);
+                  setClarification(undefined);
+                }}
               />
             </label>
             <small id="live-question-privacy">
@@ -378,10 +439,51 @@ export function LiveEngine({
               <button type="button" disabled={busy} onClick={showOverview}>Show dataset overview ↗</button>
             )}
           </form>
+          {clarification && (
+            <section className="query-guidance" aria-labelledby="query-clarification">
+              <h3 id="query-clarification" ref={clarificationHeading} tabIndex={-1}>Clarify your question</h3>
+              <p>{clarification.message}</p>
+              <div className="overview-actions">
+                {clarification.choices.map((choice) => (
+                  <button
+                    key={choice.column}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setQuestion(choice.question);
+                      generateQuestion(choice.question, true);
+                    }}
+                  >
+                    {choice.column}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           {overviewTables && (
             <section aria-labelledby="dataset-overview">
               <h3 id="dataset-overview">Dataset overview</h3>
               <p role="status">Based on permitted table and column names only.</p>
+              {!!overview?.question_examples?.length && (
+                <>
+                  <h4>Try asking</h4>
+                  <div className="overview-actions">
+                    {overview.question_examples.map((example) => (
+                      <button
+                        key={example}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setQuestion(example);
+                          questionField.current?.focus();
+                        }}
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               {overviewTables.length ? (
                 <>
                   <h4>Suggested queries</h4>
@@ -455,7 +557,7 @@ export function LiveEngine({
               <small>Read-only · 1,000 rows · 10-second statement limit</small>
               <button
                 className="primary"
-                disabled={busy || !sql.trim()}
+                disabled={busy || !!clarification || !sql.trim()}
                 onClick={() =>
                   void run(async (alive) => {
                     setResult(undefined);
@@ -484,11 +586,12 @@ export function LiveEngine({
                 Save this query as
                 <input required maxLength={100} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} />
               </label>
-              <button disabled={busy || !saveTitle.trim()}>Save query</button>
+              <button disabled={busy || !!clarification || !saveTitle.trim()}>Save query</button>
             </form>
           )}
           {result && (
             <>
+              <ResultHighlights result={result} />
               <ResultTable result={result} />
               <details>
                 <summary>Executed SQL</summary>
