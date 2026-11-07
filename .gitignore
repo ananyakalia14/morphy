@@ -18,3 +18,4 @@ supabase/migrations/00000000000002_live_engine.sql
 supabase/migrations/00000000000003_saved_queries.sql
 supabase/migrations/00000000000004_dashboards.sql
 supabase/migrations/00000000000005_account_lifecycle.sql
+supabase/migrations/00000000000006_legacy_signup_trigger.sql
