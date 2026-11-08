@@ -16,6 +16,7 @@ from .nl2sql import draft
 from .cache import generation_key, read_draft, store_draft
 from .imported import read_csv, execute_csv, parquet_to_csv
 from .csv_queries import ColumnClarification, analytics_sql, question_examples
+from .ops_activity import FileTypeMismatch, PROMPT_OVERRIDE, enforce_access, track_operation
 from starlette.concurrency import run_in_threadpool
 from fastapi import Request
 import sqlite3
@@ -115,6 +116,12 @@ async def authorized_target(database_id, user, config, *, viewing_panel=False):
             await conn.execute(
                 "SELECT set_config('request.jwt.claim.sub',$1,true)", str(user)
             )
+            org = await conn.fetchval(
+                """SELECT t.org_id FROM public.target_databases t
+                   JOIN public.memberships m ON m.org_id=t.org_id AND m.user_id=$2
+                   WHERE t.id=$1""", database_id, user,
+            )
+            await enforce_access(conn, user, org, database_id if org else None)
             raw = await conn.fetchval(
                 "SELECT public.effective_permission($1)", database_id
             )
@@ -180,9 +187,11 @@ async def require_admin(conn, database_id, user, dialects):
         list(dialects),
     )
     if not row:
+        await enforce_access(conn, user)
         raise HTTPException(
             403, "An organization administrator must configure the connection."
         )
+    await enforce_access(conn, user, row["org_id"], database_id)
     return row
 
 
@@ -290,6 +299,15 @@ async def render_panel(
     conn = await control(config)
     try:
         async with conn.transaction():
+            scope = await conn.fetchrow(
+                """SELECT d.org_id,d.database_id FROM public.dashboards d
+                   JOIN public.memberships m ON m.org_id=d.org_id AND m.user_id=$2
+                   WHERE d.id=$1""", dashboard_id, user,
+            )
+            await enforce_access(
+                conn, user, scope["org_id"] if scope else None,
+                scope["database_id"] if scope else None,
+            )
             await conn.execute(
                 "SELECT set_config('request.jwt.claim.sub',$1,true)", str(user)
             )
@@ -323,6 +341,13 @@ async def render_panel(
 
 
 async def execute_sql(database_id, user, config, target_info, submitted_sql):
+    async with track_operation(
+        lambda: control(config), org=target_info[2], actor=user, source=database_id, kind="query",
+    ):
+        return await execute_authorized_sql(database_id, user, config, target_info, submitted_sql)
+
+
+async def execute_authorized_sql(database_id, user, config, target_info, submitted_sql):
     uri, policy, org, kind = target_info
     started = time.perf_counter()
     try:
@@ -389,7 +414,16 @@ async def generate(
     user=Depends(identity),
     config=Depends(settings),
 ):
-    uri, policy, _, kind = await authorized_target(database_id, user, config)
+    target = await authorized_target(database_id, user, config)
+    async with track_operation(
+        lambda: control(config), org=target[2], actor=user, source=database_id, kind="generation",
+        prompt_flagged=bool(PROMPT_OVERRIDE.search(payload.question)),
+    ) as use_model:
+        return await generate_authorized_sql(database_id, payload, config, target, use_model)
+
+
+async def generate_authorized_sql(database_id, payload, config, target_info, use_model):
+    uri, policy, _, kind = target_info
     if kind == "csv-v1":
         reflected, _ = await run_in_threadpool(read_csv, uri)
         edges = []
@@ -472,6 +506,7 @@ async def generate(
                         "PostgreSQL validation: " + str(error.sqlstate)
                     ) from error
 
+        use_model()
         result = await draft(
             config, payload.question, reflected, policy, edges, check_plan,
             result_dialect=dialect,
@@ -498,25 +533,46 @@ async def import_csv(
     user=Depends(identity),
     config=Depends(settings),
 ):
+    conn = await control(config)
+    try:
+        async with conn.transaction():
+            row = await require_admin(conn, database_id, user, ("sqlite",))
+    finally:
+        await conn.close()
+    async with track_operation(
+        lambda: control(config), org=row["org_id"], actor=user, source=database_id, kind="import",
+    ):
+        return await import_authorized_file(database_id, request, user, config)
+
+
+async def import_authorized_file(database_id, request, user, config):
     contents = bytearray()
     async for chunk in request.stream():
         if len(contents) + len(chunk) > 1_048_576:
             raise HTTPException(413, "Choose a CSV or Parquet file up to 1 MB.")
         contents.extend(chunk)
+    media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    parquet = media_type == "application/vnd.apache.parquet"
+    if parquet and not contents.startswith(b"PAR1"):
+        raise FileTypeMismatch()
+    if not parquet and contents.startswith((b"PAR1", b"SQLite format 3\x00", b"PK\x03\x04", b"\x7fELF", b"\x1f\x8b")):
+        raise FileTypeMismatch()
+    try:
+        if parquet:
+            try:
+                text = await run_in_threadpool(parquet_to_csv, bytes(contents))
+            except ImportError:
+                raise HTTPException(503, "Install the server's requirements-parquet.txt to enable Parquet imports.")
+        else:
+            text = contents.decode("utf-8-sig")
+        reflected, records = await run_in_threadpool(read_csv, text)
+    except (ValueError, UnicodeError) as error:
+        raise HTTPException(422, str(error)) from None
+    blob = encrypt_uri(text, config.encryption_key, database_id)
     conn = await control(config)
     try:
         async with conn.transaction():
             row = await require_admin(conn, database_id, user, ("sqlite",))
-            parquet = request.headers.get("content-type", "").split(";")[0].strip().lower() == "application/vnd.apache.parquet"
-            if parquet:
-                try:
-                    text = await run_in_threadpool(parquet_to_csv, bytes(contents))
-                except ImportError:
-                    raise HTTPException(503, "Install the server's requirements-parquet.txt to enable Parquet imports.")
-            else:
-                text = contents.decode("utf-8-sig")
-            reflected, records = await run_in_threadpool(read_csv, text)
-            blob = encrypt_uri(text, config.encryption_key, database_id)
             await conn.execute(
                 """
                 INSERT INTO morphy_private.connection_secrets(database_id,encrypted_credential,key_version)
@@ -538,7 +594,5 @@ async def import_csv(
                 "columns": list(reflected["records"]),
                 "rows": len(records),
             }
-    except (ValueError, UnicodeError) as error:
-        raise HTTPException(422, str(error))
     finally:
         await conn.close()

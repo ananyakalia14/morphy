@@ -99,7 +99,7 @@ jobs:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
           MORPHY_EMBEDDINGS: "off"
           MORPHY_TEST_REDIS_URL: redis://127.0.0.1:56380/0
-        run: python -m pytest tests/test_live_engine.py tests/test_account_lifecycle.py tests/test_audit_worker.py -q
+        run: python -m pytest tests/test_live_engine.py tests/test_account_lifecycle.py tests/test_audit_worker.py tests/test_platform_operations.py -q
         working-directory: backend
       - name: Set up MySQL and MariaDB source fixtures
         run: |

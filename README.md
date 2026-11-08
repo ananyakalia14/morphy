@@ -47,6 +47,7 @@ Hosted Supabase password sessions, separate organizations, shared dashboards and
 - [Engine API contract](docs/API.md)
 - [Execution evaluation guide](docs/EVALUATION.md)
 - [Dashboard data contract](docs/DASHBOARDS.md)
+- [Platform operations API and dashboard handoff](docs/OPERATIONS.md)
 - [Antigravity CLI brief and checklist](cli/README.md)
 - [Lovable website brief and checklist](frontend/README.md)
 - [Repository workflow](CONTRIBUTING.md)
