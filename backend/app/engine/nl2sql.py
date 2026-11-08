@@ -1,7 +1,6 @@
 """Build the model context exclusively from the caller's effective schema."""
 
 from collections import deque
-import asyncio
 from hashlib import blake2s
 import json
 import re
@@ -157,7 +156,7 @@ class Glossary:
 
 async def draft(
     config, question, reflected, policy, edges, validate_plan=None, *,
-    result_dialect="postgres", source_schema=None,
+    result_dialect="postgres", source_schema=None, database_id=None,
 ):
     permitted = {
         t: {c: reflected[t][c] for c in cols if c in reflected[t]}
@@ -165,7 +164,7 @@ async def draft(
         if t in reflected
     }
     permitted = {t: c for t, c in permitted.items() if c}
-    anchors = await asyncio.to_thread(semantic_anchors, question, permitted)
+    anchors = await semantic_anchors(question, permitted, database_id=database_id)
     context = select_context(question, permitted, edges, anchors)
     if not context:
         raise ValueError("No permitted columns")
