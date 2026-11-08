@@ -1,6 +1,6 @@
 const ENGINE: string = import.meta.env["VITE_ENGINE_URL"] || "/api";
 import { useEffect, useRef, useState } from "react";
-import { db, remoteSource, rows, type Source } from "./client";
+import { connectionSource, db, rows, type Source } from "./client";
 import { AnimalMorphLoader } from "./Motion";
 import { saveQuery } from "./Library";
 import { createLatest } from "./latest";
@@ -187,7 +187,7 @@ export function LiveEngine({
     rows<Source>("target_databases", { org_id: org })
       .then((data) => {
         if (!alive) return;
-        const supported = data.filter((s) => s.dialect === "sqlite" || remoteSource(s.dialect));
+        const supported = data.filter((s) => s.dialect === "sqlite" || connectionSource(s.dialect));
         setSources(supported);
         setDatabase(
           initial && supported.some((s) => s.id === initial.database)
@@ -276,7 +276,7 @@ export function LiveEngine({
   }
   const sourceDialect = sources.find((source) => source.id === database)?.dialect ?? "";
   const csvSource = sourceDialect === "sqlite";
-  const connection = remoteSource(sourceDialect);
+  const connection = connectionSource(sourceDialect);
   const f = filter.trim().toLowerCase();
   const visible = Object.entries(schema).filter(
     ([t, cols]) => !f || t.toLowerCase().includes(f) || Object.keys(cols).some((c) => c.toLowerCase().includes(f)),
@@ -346,7 +346,7 @@ export function LiveEngine({
                 <label>
                   Read-only {connection.label} connection URI
                   <input
-                    type="password"
+                    type={sourceDialect === "duckdb" ? "text" : "password"}
                     autoComplete="off"
                     required
                     value={uri}
@@ -354,7 +354,9 @@ export function LiveEngine({
                     placeholder={connection.example}
                   />
                 </label>
-                <small>Use a dedicated read-only database user. The host must be approved in the server settings.</small>
+                <small>{sourceDialect === "duckdb"
+                  ? "Use the URI of the snapshot provisioned for this source on the engine."
+                  : "Use a dedicated read-only database user. The host must be approved in the server settings."}</small>
                 <button disabled={busy}>Verify & save connection</button>
               </form>
             </details>

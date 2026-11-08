@@ -157,6 +157,11 @@ def compile_query(sql, schema, policy, dialect="postgres", *, source_schema=None
                 # match other cases or accents. Compare policy values by bytes.
                 field = exp.cast(field, "BINARY", dialect="mysql")
                 literal = exp.cast(literal, "BINARY", dialect="mysql")
+            elif dialect == "duckdb" and schema[name][column] == "VARCHAR":
+                field = exp.Anonymous(this="encode", expressions=[field])
+                literal = exp.Anonymous(
+                    this="encode", expressions=[exp.cast(literal, "VARCHAR", dialect="duckdb")]
+                )
             source = source.where(field.eq(literal))
         table.replace(source.subquery(exp.to_identifier(alias, quoted=True)))
     return (

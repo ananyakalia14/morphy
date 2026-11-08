@@ -20,6 +20,12 @@ Profiles, organizations, invitations, roles and permission settings are exposed 
 
 Registered remote sources support PostgreSQL, MySQL and MariaDB. MySQL and MariaDB use their own URI schemes (`mysql://` or `mariadb://`) and the MySQL SQL dialect. Use a dedicated SELECT-only account, an application database with InnoDB base tables, a server allowlist entry in `MORPHY_TARGET_HOSTS`, and a publicly or locally trusted TLS certificate that matches the hostname. `sslmode=verify-full` is the default. Loopback-only test fixtures may set `sslmode=disable`. Views, system databases, cross-database references, session variables, file functions and optimizer hints are outside this connector's supported query surface. Row-policy equality uses binary comparison to prevent the target collation from widening a policy.
 
+### Local DuckDB snapshots
+
+Install `backend/requirements-duckdb.txt` in the engine's Python environment. Set `MORPHY_DUCKDB_ROOT` to an existing absolute directory and set `VITE_ENABLE_DUCKDB=1` for the local website. Register a source with dialect `duckdb`, then have the engine operator place a trusted, checkpointed database file at `<MORPHY_DUCKDB_ROOT>/<source UUID>/orders.duckdb`. Send `duckdb:///orders.duckdb` to the existing connection endpoint. The API accepts a simple filename in that source's folder and rejects symlink paths. Keep the snapshot folder writable only by the operator.
+
+The connector uses read-only DuckDB connections with external file and network access and extension loading disabled. It discovers supported scalar columns on base tables in `main`. Table and column identifiers are exposed in lowercase, consistent with DuckDB's case-insensitive lookup. Persistent macros are rejected, and text row policies compare UTF-8 bytes to avoid collation widening. Use DuckDB SQL for manual queries. Generated drafts are translated and plan-checked against DuckDB before review. Apply access policies as for other sources.
+
 Connection and import actions require an organization administrator. Query/schema/generation require QUERY_ONLY or SCHEMA_EDIT and explicit database permissions. An admin role alone does not create a data grant.
 
 The connection and import responses contain metadata for the administrator's setup review. They contain no row values and do not create a query grant. Continue to use the separate policy-filtered GET schema endpoint for the query workspace.
