@@ -476,6 +476,7 @@ async def generate(
             config, payload.question, reflected, policy, edges, check_plan,
             result_dialect=dialect,
             source_schema=compile_options.get("source_schema"),
+            database_id=database_id,
         )
         await store_draft(key, result["sql"])
         return {**result, "cache": "miss"}

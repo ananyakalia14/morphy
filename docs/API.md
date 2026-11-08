@@ -46,6 +46,20 @@ Rows are filtered inside each source before joins and aggregates. Column permiss
 
 Redis stores generated SQL for exact questions and current database/schema/policy/model/graph fingerprints. Every cache hit is revalidated. Cached results never grant execution authority.
 
+## Optional Redis services
+
+### Semantic schema search
+
+Install `backend/requirements-vectors.txt`, make the all-MiniLM-L6-v2 weights available offline, and configure `MORPHY_REDIS_URL` and `MORPHY_REDIS_SEMANTIC=1` on the engine. The Redis instance must support the Search module and HNSW commands. Use a private TLS endpoint in production.
+
+For a live source with 13 to 128 permitted tables, Redis can rank schema anchors before foreign-key expansion. The index is scoped to the database, embedding model, and exact permitted schema. It holds embeddings under opaque keys for one hour. Redis receives a question embedding for the lookup. It receives no raw question, raw schema names, or row values on this path. The engine retains local vector and lexical fallback. This feature retrieves schema anchors. SQL draft reuse continues to use exact question and policy matching.
+
+### Audit stream publisher
+
+Apply migration 007 and run `python -m app.engine.audit_worker` from `backend/` in a supervised, long-running process. Provide `MORPHY_CONTROL_DSN` and a private `MORPHY_AUDIT_REDIS_URL` as server-only environment variables. The worker needs access to read the audit table, update the private settings row, and lock and delete private outbox rows.
+
+The worker enables capture after its first successful PostgreSQL and Redis connections. New audit events enter the outbox in the same PostgreSQL transaction as the original record. During an outage the outbox retains pending events, and the existing audit log remains authoritative. The worker publishes event ID, organization ID, action and timestamp to `morphy:audit:v1`. Consumer deduplication uses `event_id` because retries can deliver the same event more than once. The stream keeps approximately 10,000 recent entries. For an intentional shutdown, stop all publisher processes and set `morphy_private.audit_stream_settings.enabled` to false to pause capture. Existing outbox entries remain queued until publishing resumes.
+
 ## Errors
 
 FastAPI errors use a detail field. Handle 401 by asking the user to sign in again, 403 as denied access, 409 as missing/incompatible connection setup, 413 as oversized input/result, 422 as validation/generation failure, 502 as database failure and 503 as service/configuration unavailability.
