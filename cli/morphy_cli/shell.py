@@ -3,6 +3,7 @@
 import getpass
 import os
 from pathlib import Path
+import re
 import sys
 from typing import Any, Optional
 from uuid import UUID
@@ -19,16 +20,23 @@ from .control import ControlClient, ControlPlaneError
 from .queries import QueryStore
 from .formatting import (
     format_banner,
+    format_clarification,
     format_csv,
     format_examples,
     format_generation,
     format_json,
+    format_overview,
     format_records_table,
     format_schema,
     format_table,
 )
 
 import httpx
+
+OVERVIEW_PROMPT = re.compile(
+    r"^(?:what is this (?:data|dataset|database|table) about|describe this (?:dataset|database|table)|give me an overview of this (?:dataset|database|table)|(?:show(?: me)? )?(?:the )?(?:dataset |data |schema )?overview)[?.!]*$",
+    re.IGNORECASE,
+)
 
 _HELP_TEXT = """\
 Available commands:
@@ -52,7 +60,7 @@ Available commands:
 
   Database Administration:
     /connect <postgres_uri>    Connect target PostgreSQL database (Admin only)
-    /import <path_to_csv>      Import UTF-8 CSV up to 1 MB (Admin only)
+    /import <file.csv|parquet> Import UTF-8 CSV or Parquet up to 1 MB (Admin only)
 
   Team & Invitations:
     /members                   List members of active organization
@@ -63,8 +71,8 @@ Available commands:
 
   Queries & Saved Queries:
     /schema                    Display permitted tables and columns
-    /examples                  List curated example questions
-    /ask <question>            Generate governed SQL from natural language
+    /examples                  List starter question examples or suggested queries
+    /ask <question>            Generate governed SQL (supports clarification & dataset overview)
     /sql <SELECT ...>          Execute read-only SQL query
     /save-query <name> [sql]   Save current or specified SQL query
     /queries                   List saved queries
@@ -280,16 +288,23 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
     if cmd.startswith("/import"):
         parts = cmd.split(maxsplit=1)
         if len(parts) < 2:
-            return "Usage: /import <path_to_csv_file>"
-        csv_path = Path(parts[1].strip().strip('"').strip("'"))
-        if not csv_path.is_file():
-            return f"File not found: {csv_path}"
+            return "Usage: /import <path_to_csv_or_parquet_file>"
+        file_path = Path(parts[1].strip().strip('"').strip("'"))
+        if not file_path.is_file():
+            return f"File not found: {file_path}"
         if not ctx.active_db_id:
             return "Select a database first with /use-db <id> before importing data."
         try:
-            data = csv_path.read_bytes()
-            res = ctx.client.import_csv(data)
-            return f"Imported {res.get('rows', 0)} rows into '{res.get('table', 'records')}'. Columns: {', '.join(res.get('columns', []))}"
+            is_parquet = file_path.suffix.lower() == ".parquet"
+            data = file_path.read_bytes()
+            if len(data) > 1_048_576:
+                return "Choose a CSV or Parquet file up to 1 MB."
+            if hasattr(ctx.client, "import_file"):
+                res = ctx.client.import_file(data, is_parquet=is_parquet)
+            else:
+                res = ctx.client.import_csv(data)
+            file_type = "Parquet" if is_parquet else "CSV"
+            return f"Imported {res.get('rows', 0)} rows from {file_type} into '{res.get('table', 'records')}'. Columns: {', '.join(res.get('columns', []))}"
         except EngineError as err:
             return f"Import error: {err.detail}"
         except Exception as err:
@@ -647,18 +662,95 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
             return f"Failed to write CSV: {err}"
 
     # ── Schema & Examples ───────────────────────────────────────────────
-    if cmd in ("/schema", "/examples"):
+    if cmd == "/schema":
         metadata = ctx.client.schema()
-        if cmd == "/schema":
-            return format_schema(metadata.get("tables", {}))
-        return format_examples(metadata.get("examples", ["Use /ask followed by your question."]))
+        return format_schema(metadata.get("tables", {}))
+
+    if cmd == "/examples":
+        metadata = ctx.client.schema()
+        examples = metadata.get("question_examples") or metadata.get("examples")
+        if examples:
+            return format_examples(examples)
+        tables = metadata.get("tables", {})
+        if tables:
+            suggestions = []
+            for table, cols in tables.items():
+                col_names = list(cols.keys()) if isinstance(cols, dict) else list(cols)
+                preview = ", ".join(f'"{c}"' for c in col_names[:3])
+                suggestions.append(f'SELECT COUNT(*) AS row_count FROM "{table}"')
+                if preview:
+                    suggestions.append(f'SELECT {preview} FROM "{table}" LIMIT 10')
+            return "Suggested starter queries for permitted tables:\n" + "\n".join(f"  • /sql {s}" for s in suggestions)
+        return "No permitted tables or examples available for this database."
 
     # ── Natural Language /ask ───────────────────────────────────────────
-    if cmd.startswith("/ask "):
-        question = cmd[5:].strip()
+    if cmd == "/ask" or cmd.startswith("/ask "):
+        question = cmd[5:].strip() if cmd.startswith("/ask ") else ""
         if not question:
+            try:
+                metadata = ctx.client.schema()
+            except Exception:
+                metadata = {}
+            examples = metadata.get("question_examples") or metadata.get("examples") or []
+            if examples:
+                return "Usage: /ask <question>\n\nStarter questions to try:\n" + format_examples(examples)
             return "Usage: /ask <question>"
-        generated = ctx.client.generate(question)
+
+        # Check for overview requests
+        if OVERVIEW_PROMPT.match(question.strip()):
+            try:
+                metadata = ctx.client.schema()
+                tables = metadata.get("tables", {})
+                question_examples = metadata.get("question_examples") or metadata.get("examples") or []
+                return format_overview(tables, question_examples)
+            except EngineError as err:
+                return f"Schema overview error: {err.detail}"
+
+        # Generate SQL (with clarification support in live mode)
+        try:
+            try:
+                generated = ctx.client.generate(question, include_clarification=True)
+            except TypeError:
+                generated = ctx.client.generate(question)
+        except EngineError as err:
+            return f"Generation error: {err.detail}"
+
+        # Interactive clarification flow
+        if generated.get("kind") == "clarification":
+            message = generated.get("message", "Clarify your question:")
+            choices = generated.get("choices", [])
+            print(f"\n{message}\n")
+            for idx, choice in enumerate(choices, 1):
+                col = choice.get("column", "")
+                q = choice.get("question", "")
+                print(f"  [{idx}] {col}  \u2192  {q}")
+            print()
+            try:
+                choice_input = input(f"Choose a column [1-{len(choices)}] (or press Enter to cancel): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return "(clarification cancelled)"
+            if not choice_input:
+                return "(clarification cancelled)"
+
+            selected_choice = None
+            if choice_input.isdigit():
+                choice_idx = int(choice_input) - 1
+                if 0 <= choice_idx < len(choices):
+                    selected_choice = choices[choice_idx]
+            else:
+                for choice in choices:
+                    if choice.get("column", "").lower() == choice_input.lower():
+                        selected_choice = choice
+                        break
+
+            if not selected_choice:
+                return f"Invalid choice '{choice_input}'. Query cancelled."
+
+            try:
+                generated = ctx.client.generate(selected_choice["question"], require_template=True)
+            except EngineError as err:
+                return f"Generation error: {err.detail}"
+
         output = format_generation(generated)
 
         # In sample mode: execute immediately

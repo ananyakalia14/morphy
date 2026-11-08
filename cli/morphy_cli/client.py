@@ -152,8 +152,19 @@ class MorphyClient:
     def schema(self) -> dict[str, Any]:
         return self._request("GET", self.prefix + "/schema")
 
-    def generate(self, question: str) -> dict[str, Any]:
-        return self._request("POST", self.prefix + "/generate", payload={"question": question})
+    def generate(
+        self,
+        question: str,
+        include_clarification: bool = False,
+        require_template: bool = False,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"question": question}
+        if self.is_live:
+            if include_clarification:
+                payload["include_clarification"] = True
+            if require_template:
+                payload["require_template"] = True
+        return self._request("POST", self.prefix + "/generate", payload=payload)
 
     def query(self, sql: str) -> dict[str, Any]:
         return self._request("POST", self.prefix + "/query", payload={"sql": sql})
@@ -168,19 +179,32 @@ class MorphyClient:
             payload={"uri": uri},
         )
 
-    def import_csv(self, csv_data: Union[str, bytes]) -> dict[str, Any]:
-        """Import UTF-8 CSV data into the active SQLite/CSV database."""
+    def import_file(
+        self, file_data: Union[str, bytes], is_parquet: bool = False
+    ) -> dict[str, Any]:
+        """Import UTF-8 CSV or Parquet data into the active SQLite/CSV database."""
         if not self.database:
             raise EngineError(400, "Select a database first using /use-db <id>")
-        raw_bytes = csv_data.encode("utf-8") if isinstance(csv_data, str) else csv_data
+        raw_bytes = file_data.encode("utf-8") if isinstance(file_data, str) else file_data
         if len(raw_bytes) > 1_048_576:
-            raise EngineError(413, "Choose a UTF-8 CSV up to 1 MB.")
+            raise EngineError(413, "Choose a CSV or Parquet file up to 1 MB.")
+        content_type = (
+            "application/vnd.apache.parquet"
+            if is_parquet
+            else "text/csv; charset=utf-8"
+        )
         return self._request(
             "PUT",
             f"/api/engine/databases/{self.database}/import",
             content=raw_bytes,
-            headers={"Content-Type": "text/csv; charset=utf-8"},
+            headers={"Content-Type": content_type},
         )
+
+    def import_csv(
+        self, csv_data: Union[str, bytes], is_parquet: bool = False
+    ) -> dict[str, Any]:
+        """Backward-compatible wrapper for import_file."""
+        return self.import_file(csv_data, is_parquet=is_parquet)
 
     def render_panel(
         self, dashboard_id: Union[UUID, str], query_id: Union[UUID, str]

@@ -407,6 +407,9 @@ class MockClient:
     def import_csv(self, data):
         return {"table": "records", "columns": ["a", "b"], "rows": 10}
 
+    def import_file(self, data, is_parquet=False):
+        return {"table": "records", "columns": ["a", "b"], "rows": 10}
+
     def render_panel(self, dashboard_id, query_id):
         return {
             "columns": ["panel_metric", "val"],
@@ -712,6 +715,118 @@ class TestHandleCommand:
             rev_res = _handle_command(ctx, "/perm-revoke ADMIN")
             assert "Revoked permission for role 'ADMIN'" in rev_res
             mock_revoke.assert_called_once_with("org-123", "db-456", role_id="role-admin-1")
+
+    def test_ask_empty_shows_starter_questions(self):
+        ctx = create_test_context(is_live=True)
+        with patch.object(ctx.client, "schema", return_value={"tables": {"records": ["a", "b"]}, "question_examples": ["How many records?", "Count by city"]}):
+            res = _handle_command(ctx, "/ask")
+            assert "Usage: /ask <question>" in res
+            assert "Starter questions to try:" in res
+            assert "How many records?" in res
+            assert "Count by city" in res
+
+    def test_ask_overview_prompt(self):
+        ctx = create_test_context(is_live=True)
+        with patch.object(ctx.client, "schema", return_value={"tables": {"orders": {"id": "int4", "total": "numeric"}}, "question_examples": ["Top 5 by total"]}):
+            res = _handle_command(ctx, "/ask what is this data about?")
+            assert "Dataset Overview" in res
+            assert "orders: id, total" in res
+            assert "Top 5 by total" in res
+            assert 'SELECT COUNT(*) AS row_count FROM "orders"' in res
+
+    def test_examples_with_question_examples(self):
+        ctx = create_test_context(is_live=True)
+        with patch.object(ctx.client, "schema", return_value={"tables": {"records": ["col1"]}, "question_examples": ["Count records by dept"]}):
+            res = _handle_command(ctx, "/examples")
+            assert "Count records by dept" in res
+
+    def test_examples_suggested_queries_fallback(self):
+        ctx = create_test_context(is_live=True)
+        with patch.object(ctx.client, "schema", return_value={"tables": {"users": ["id", "name", "email"]}}):
+            res = _handle_command(ctx, "/examples")
+            assert "Suggested starter queries for permitted tables:" in res
+            assert 'SELECT COUNT(*) AS row_count FROM "users"' in res
+            assert 'SELECT "id", "name", "email" FROM "users" LIMIT 10' in res
+
+    def test_ask_interactive_clarification_choice_number(self):
+        ctx = create_test_context(is_live=True)
+        clarification_response = {
+            "kind": "clarification",
+            "message": "Several permitted columns match that metric. Which column should MORPHY use?",
+            "choices": [
+                {"column": "annual_salary", "question": "Who has the highest annual_salary?"},
+                {"column": "base_salary", "question": "Who has the highest base_salary?"},
+            ],
+        }
+        draft_response = {
+            "sql": "SELECT first_name, annual_salary FROM records ORDER BY annual_salary DESC LIMIT 1",
+            "provider": "morphy-template",
+            "requires_execution": True,
+        }
+
+        with patch.object(ctx.client, "generate") as mock_gen, \
+             patch("builtins.input", side_effect=["1", "y"]) as mock_input:
+            mock_gen.side_effect = [clarification_response, draft_response]
+            res = _handle_command(ctx, "/ask Who has the highest salary?")
+            assert mock_gen.call_count == 2
+            mock_gen.assert_any_call("Who has the highest salary?", include_clarification=True)
+            mock_gen.assert_any_call("Who has the highest annual_salary?", require_template=True)
+            assert "11650" in res
+
+    def test_ask_interactive_clarification_choice_column(self):
+        ctx = create_test_context(is_live=True)
+        clarification_response = {
+            "kind": "clarification",
+            "message": "Several permitted columns match that metric. Which column should MORPHY use?",
+            "choices": [
+                {"column": "annual_salary", "question": "Who has the highest annual_salary?"},
+                {"column": "base_salary", "question": "Who has the highest base_salary?"},
+            ],
+        }
+        draft_response = {
+            "sql": "SELECT first_name, base_salary FROM records ORDER BY base_salary DESC LIMIT 1",
+            "provider": "morphy-template",
+            "requires_execution": True,
+        }
+
+        with patch.object(ctx.client, "generate") as mock_gen, \
+             patch("builtins.input", side_effect=["base_salary", "n"]):
+            mock_gen.side_effect = [clarification_response, draft_response]
+            res = _handle_command(ctx, "/ask Who has the highest salary?")
+            assert mock_gen.call_count == 2
+            mock_gen.assert_any_call("Who has the highest base_salary?", require_template=True)
+            assert "not executed" in res
+
+    def test_ask_interactive_clarification_cancelled(self):
+        ctx = create_test_context(is_live=True)
+        clarification_response = {
+            "kind": "clarification",
+            "message": "Several permitted columns match that metric.",
+            "choices": [{"column": "col_a", "question": "Ask col_a?"}],
+        }
+        with patch.object(ctx.client, "generate", return_value=clarification_response), \
+             patch("builtins.input", return_value=""):
+            res = _handle_command(ctx, "/ask ambiguous question")
+            assert "(clarification cancelled)" in res
+
+    def test_import_parquet_file(self, tmp_path):
+        parquet_file = tmp_path / "test.parquet"
+        parquet_file.write_bytes(b"PAR1dummydata")
+        ctx = create_test_context(is_live=True)
+        ctx.active_db_id = "test-uuid"
+        with patch.object(ctx.client, "import_file", return_value={"table": "records", "columns": ["x", "y"], "rows": 42}) as mock_import:
+            res = _handle_command(ctx, f"/import {parquet_file}")
+            assert "Imported 42 rows from Parquet into 'records'" in res
+            assert "x, y" in res
+            mock_import.assert_called_once_with(b"PAR1dummydata", is_parquet=True)
+
+    def test_import_parquet_oversized(self, tmp_path):
+        large_file = tmp_path / "large.parquet"
+        large_file.write_bytes(b"x" * (1_048_576 + 10))
+        ctx = create_test_context(is_live=True)
+        ctx.active_db_id = "test-uuid"
+        res = _handle_command(ctx, f"/import {large_file}")
+        assert "Choose a CSV or Parquet file up to 1 MB" in res
 
     def test_account_switching_isolation(self):
         ctx = create_test_context()

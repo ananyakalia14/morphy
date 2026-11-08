@@ -82,13 +82,53 @@ def format_examples(examples: list[str]) -> str:
     return "\n".join(f"  • {title}" for title in examples)
 
 
+def format_clarification(message: str, choices: list[dict[str, str]]) -> str:
+    """Format an interactive clarification request with numbered options."""
+    lines = [f"{message}\n"]
+    for idx, choice in enumerate(choices, 1):
+        col = choice.get("column", "")
+        q = choice.get("question", "")
+        lines.append(f"  [{idx}] {col}  \u2192  {q}")
+    return "\n".join(lines)
+
+
+def format_overview(tables: dict, question_examples: list[str]) -> str:
+    """Format a dataset overview with starter questions and suggested queries."""
+    lines = ["Dataset Overview (based on permitted schema):"]
+    if tables:
+        lines.append("\nPermitted Tables & Columns:")
+        for table, cols in tables.items():
+            col_list = list(cols.keys()) if isinstance(cols, dict) else list(cols)
+            lines.append(f"  \u2022 {table}: {', '.join(col_list)}")
+
+    if question_examples:
+        lines.append("\nStarter questions to try:")
+        for example in question_examples:
+            lines.append(f"  \u2022 /ask {example}")
+
+    if tables:
+        lines.append("\nSuggested queries:")
+        for table, cols in tables.items():
+            col_list = list(cols.keys()) if isinstance(cols, dict) else list(cols)
+            preview = ", ".join(f'"{c}"' for c in col_list[:3])
+            lines.append(f'  \u2022 /sql SELECT COUNT(*) AS row_count FROM "{table}"')
+            if preview:
+                lines.append(f'  \u2022 /sql SELECT {preview} FROM "{table}" LIMIT 10')
+
+    return "\n".join(lines)
+
+
 def format_generation(gen: dict) -> str:
     """Format a generation response showing SQL and metadata."""
     lines = []
     lines.append(gen["sql"])
     meta = []
     if gen.get("provider"):
-        meta.append(gen["provider"])
+        if gen["provider"] == "morphy-template":
+            meta.append("Built from permitted columns")
+            meta.append("morphy-template")
+        else:
+            meta.append(gen["provider"])
     if gen.get("attempts"):
         meta.append(f"{gen['attempts']} attempt{'s' if gen['attempts'] != 1 else ''}")
     if gen.get("cache"):

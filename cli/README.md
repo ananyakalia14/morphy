@@ -47,7 +47,7 @@ The current CLI uses httpx and a simple input loop. Access tokens remain in the 
 - `/dbs`: List databases registered in active organization.
 - `/use-db <id|name|sample>`: Switch target database context (or return to sample workspace).
 - `/connect <uri>`: Save and verify target PostgreSQL connection (admin).
-- `/import <path>`: Ingest UTF-8 CSV data up to 1 MB into SQLite target database (admin).
+- `/import <path>`: Ingest UTF-8 CSV or Parquet data up to 1 MB into SQLite target database (admin).
 
 ### Team & Collaboration
 - `/members`: List members and assigned roles in the active organization.
@@ -58,8 +58,8 @@ The current CLI uses httpx and a simple input loop. Access tokens remain in the 
 
 ### Queries & Saved Queries
 - `/schema`: View allowed tables and column types.
-- `/examples`: List curated natural-language query examples.
-- `/ask <question>`: Natural language query generation with pre-execution review.
+- `/examples`: List starter question examples or suggested queries for permitted tables.
+- `/ask [question]`: Natural language query generation with interactive clarification for ambiguous metrics, dataset overviews, and pre-execution review.
 - `/sql <SELECT ...>`: Execute read-only SQL queries.
 - `/save-query <name> [sql]`: Save current or specified query.
 - `/queries`: List all saved queries.
