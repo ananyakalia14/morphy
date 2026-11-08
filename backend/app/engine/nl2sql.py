@@ -156,7 +156,8 @@ class Glossary:
 
 
 async def draft(
-    config, question, reflected, policy, edges, validate_plan=None, *, result_dialect="postgres"
+    config, question, reflected, policy, edges, validate_plan=None, *,
+    result_dialect="postgres", source_schema=None,
 ):
     permitted = {
         t: {c: reflected[t][c] for c in cols if c in reflected[t]}
@@ -213,10 +214,13 @@ async def draft(
                 if not isinstance(candidate, str) or len(candidate) > 12000:
                     raise ValueError("Invalid query length")
                 sql = glossary.restore(candidate)
+                if result_dialect != "postgres":
+                    sql = transpile(sql, read="postgres", write=result_dialect)[0]
                 if result_dialect == "sqlite":
-                    sql = transpile(sql, read="postgres", write="sqlite")[0]
                     validate_numeric_operations(sql, {column.lower() for column in measures})
-                compiled = compile_query(sql, reflected, policy, dialect=result_dialect)
+                compiled = compile_query(
+                    sql, reflected, policy, dialect=result_dialect, source_schema=source_schema
+                )
                 if validate_plan:
                     await validate_plan(compiled)
                 return {

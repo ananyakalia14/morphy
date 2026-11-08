@@ -1,6 +1,6 @@
 const ENGINE: string = import.meta.env["VITE_ENGINE_URL"] || "/api";
 import { useEffect, useRef, useState } from "react";
-import { db, rows, type Source } from "./client";
+import { db, remoteSource, rows, type Source } from "./client";
 import { AnimalMorphLoader } from "./Motion";
 import { saveQuery } from "./Library";
 import { createLatest } from "./latest";
@@ -27,8 +27,9 @@ type Clarification = {
 };
 const overviewPrompt = /^(?:what is this (?:data|dataset|database|table) about|describe this (?:dataset|database|table)|give me an overview of this (?:dataset|database|table))[?.!]*$/i;
 
-function sqlIdentifier(name: string) {
-  return '"' + name.replaceAll('"', '""') + '"';
+function sqlIdentifier(name: string, dialect: string) {
+  const quote = dialect === "mysql" || dialect === "mariadb" ? "`" : '"';
+  return quote + name.replaceAll(quote, quote + quote) + quote;
 }
 
 export const SESSION_EXPIRED = "morphy:session-expired";
@@ -186,7 +187,7 @@ export function LiveEngine({
     rows<Source>("target_databases", { org_id: org })
       .then((data) => {
         if (!alive) return;
-        const supported = data.filter((s) => ["postgres", "sqlite"].includes(s.dialect));
+        const supported = data.filter((s) => s.dialect === "sqlite" || remoteSource(s.dialect));
         setSources(supported);
         setDatabase(
           initial && supported.some((s) => s.id === initial.database)
@@ -273,7 +274,9 @@ export function LiveEngine({
     setStatus("Suggested SQL loaded for review.");
     editor.current?.focus();
   }
-  const csvSource = sources.find((source) => source.id === database)?.dialect === "sqlite";
+  const sourceDialect = sources.find((source) => source.id === database)?.dialect ?? "";
+  const csvSource = sourceDialect === "sqlite";
+  const connection = remoteSource(sourceDialect);
   const f = filter.trim().toLowerCase();
   const visible = Object.entries(schema).filter(
     ([t, cols]) => !f || t.toLowerCase().includes(f) || Object.keys(cols).some((c) => c.toLowerCase().includes(f)),
@@ -283,7 +286,7 @@ export function LiveEngine({
     <section className="panel">
       <h2>Query engine</h2>
       {!sources.length ? (
-        <p>Ask an administrator to register a PostgreSQL or SQLite database and grant query access.</p>
+        <p>Ask an administrator to register a data source and grant query access.</p>
       ) : (
         <>
           <label>
@@ -323,7 +326,7 @@ export function LiveEngine({
               />
             </label>
           )}
-          {admin && !csvSource && (
+          {admin && connection && (
             <details>
               <summary>Connect database</summary>
               <form
@@ -341,14 +344,14 @@ export function LiveEngine({
                 }}
               >
                 <label>
-                  Read-only PostgreSQL connection URI
+                  Read-only {connection.label} connection URI
                   <input
                     type="password"
                     autoComplete="off"
                     required
                     value={uri}
                     onChange={(e) => setUri(e.target.value)}
-                    placeholder="postgresql://user:password@host/database"
+                    placeholder={connection.example}
                   />
                 </label>
                 <small>Use a dedicated read-only database user. The host must be approved in the server settings.</small>
@@ -383,13 +386,13 @@ export function LiveEngine({
                         <summary>
                           {table} <small>{Object.keys(cols).length} columns</small>
                         </summary>
-                        <button type="button" className="chip" onClick={() => insert(table)}>
+                        <button type="button" className="chip" onClick={() => insert(sqlIdentifier(table, sourceDialect))}>
                           Insert table name
                         </button>
                         <ul>
                           {Object.entries(cols).map(([c, type]) => (
                             <li key={c}>
-                              <button type="button" className="chip" onClick={() => insert(c)} aria-label={"Insert column " + c}>
+                              <button type="button" className="chip" onClick={() => insert(sqlIdentifier(c, sourceDialect))} aria-label={"Insert column " + c}>
                                 {c}
                               </button>{" "}
                               <small>{type}</small>
@@ -491,8 +494,8 @@ export function LiveEngine({
                   <ul className="overview-tables">
                     {overviewTables.map(([table, columns]) => {
                       const names = Object.keys(columns);
-                      const source = sqlIdentifier(table);
-                      const preview = names.slice(0, 3).map(sqlIdentifier).join(", ");
+                      const source = sqlIdentifier(table, sourceDialect);
+                      const preview = names.slice(0, 3).map((name) => sqlIdentifier(name, sourceDialect)).join(", ");
                       return (
                         <li key={table}>
                           <div><strong>{table}</strong> · {names.join(", ")}</div>

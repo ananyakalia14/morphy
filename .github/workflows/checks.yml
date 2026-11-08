@@ -55,6 +55,20 @@ jobs:
         ports:
           - "127.0.0.1:55422:5432"
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-root
+        ports:
+          - "127.0.0.1:55336:3306"
+        options: --health-cmd "mysqladmin ping --silent" --health-interval 5s --health-timeout 3s --health-retries 20
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: fixture-root
+        ports:
+          - "127.0.0.1:55337:3306"
+        options: --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 3s --health-retries 20
     env:
       PGHOST: 127.0.0.1
       PGPORT: "55422"
@@ -79,6 +93,19 @@ jobs:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
           MORPHY_EMBEDDINGS: "off"
         run: python -m pytest tests/test_live_engine.py tests/test_account_lifecycle.py -q
+        working-directory: backend
+      - name: Set up MySQL and MariaDB source fixtures
+        run: |
+          docker exec -i -e MYSQL_PWD=fixture-root ${{ job.services.mysql.id }} mysql -uroot --default-character-set=utf8mb4 < tests/mysql-family.sql
+          docker exec -i -e MYSQL_PWD=fixture-root ${{ job.services.mariadb.id }} mariadb -uroot --default-character-set=utf8mb4 < tests/mysql-family.sql
+      - name: Verify MySQL-family API policy integration
+        env:
+          MORPHY_INTEGRATION_DSN: postgresql://postgres@127.0.0.1:55422/postgres
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          MORPHY_EMBEDDINGS: "off"
+        run: |
+          MORPHY_TEST_MYSQL_URI='mysql://morphy_reader:fixture-read-only@127.0.0.1:55336/morphy_fixture?sslmode=disable' python -m pytest tests/test_mysql.py -q
+          MORPHY_TEST_MYSQL_URI='mariadb://morphy_reader:fixture-read-only@127.0.0.1:55337/morphy_fixture?sslmode=disable' python -m pytest tests/test_mysql.py -q
         working-directory: backend
 
   cli-cross-platform:

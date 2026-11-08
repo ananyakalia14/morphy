@@ -9,6 +9,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, SecretStr
 from sqlglot.errors import SqlglotError
 from .config import Settings
+from . import mysql
 from .security import check_uri, encrypt_uri, decrypt_uri, compile_query
 from .postgres import connection, reflect
 from .nl2sql import draft
@@ -27,6 +28,8 @@ class EngineRoute(APIRoute):
         async def guarded(request):
             try:
                 return await handler(request)
+            except mysql.ConfigurationError as error:
+                raise HTTPException(422, str(error)) from error
             except (asyncpg.PostgresError, OSError, TimeoutError):
                 raise HTTPException(
                     502,
@@ -36,9 +39,29 @@ class EngineRoute(APIRoute):
         return guarded
 
 
-router = APIRouter(
-    prefix="/api/engine", tags=["Live PostgreSQL engine"], route_class=EngineRoute
-)
+router = APIRouter(prefix="/api/engine", tags=["Live query engine"], route_class=EngineRoute)
+REMOTE_DIALECTS = {"postgres", *mysql.DIALECTS}
+
+
+def remote_connection(uri, kind):
+    return mysql.connection(uri, kind) if kind in mysql.DIALECTS else connection(uri)
+
+
+def remote_reflection(target, kind):
+    return mysql.reflect(target) if kind in mysql.DIALECTS else reflect(target)
+
+
+def compiler_options(uri, kind):
+    if kind in mysql.DIALECTS:
+        return {"dialect": "mysql", "source_schema": mysql.database_name(uri)}
+    return {"dialect": "sqlite" if kind == "csv-v1" else "postgres"}
+
+
+def check_remote_uri(uri, allowed_hosts, dialect):
+    if dialect in mysql.DIALECTS:
+        mysql.check_uri(uri, allowed_hosts, dialect)
+    else:
+        check_uri(uri, allowed_hosts)
 
 
 def settings():
@@ -105,17 +128,19 @@ async def authorized_target(database_id, user, config, *, viewing_panel=False):
                 )
             row = await conn.fetchrow(
                 """
-                SELECT t.org_id,s.encrypted_credential,s.key_version FROM public.target_databases t
+                SELECT t.org_id,t.dialect,s.encrypted_credential,s.key_version FROM public.target_databases t
                 JOIN morphy_private.connection_secrets s ON s.database_id=t.id
-                WHERE t.id=$1 AND t.dialect IN ('postgres','sqlite')
+                WHERE t.id=$1 AND t.dialect=ANY($2::text[])
             """,
                 database_id,
+                [*REMOTE_DIALECTS, "sqlite"],
             )
             if not row:
                 raise HTTPException(
-                    409, "An administrator must connect this PostgreSQL database first."
+                    409, "An administrator must configure this source first."
                 )
-            if row["key_version"] not in {"aesgcm-v1", "csv-v1"}:
+            expected_version = "csv-v1" if row["dialect"] == "sqlite" else "aesgcm-v1"
+            if row["key_version"] != expected_version:
                 raise HTTPException(
                     409,
                     "This connection needs to be saved again using the current engine.",
@@ -129,26 +154,30 @@ async def authorized_target(database_id, user, config, *, viewing_panel=False):
                     503,
                     "The connection key does not match. Check the server encryption key.",
                 )
-            if row["key_version"] == "aesgcm-v1":
-                check_uri(uri, config.target_hosts)
-            return uri, policy, row["org_id"], row["key_version"]
+            if expected_version == "aesgcm-v1":
+                try:
+                    check_remote_uri(uri, config.target_hosts, row["dialect"])
+                except ValueError:
+                    raise HTTPException(409, "This source must be configured again.") from None
+            kind = row["dialect"] if row["dialect"] in mysql.DIALECTS else expected_version
+            return uri, policy, row["org_id"], kind
     finally:
         await conn.close()
 
 
-async def require_admin(conn, database_id, user, dialect):
+async def require_admin(conn, database_id, user, dialects):
     row = await conn.fetchrow(
         """
-        SELECT t.org_id FROM public.target_databases t
+        SELECT t.org_id,t.dialect FROM public.target_databases t
         JOIN public.organizations o ON o.id=t.org_id
         JOIN public.memberships m ON m.org_id=o.id AND m.user_id=$2
         JOIN public.roles r ON r.id=m.role_id
-        WHERE t.id=$1 AND t.dialect=$3 AND r.builtin AND r.name='ADMIN'
+        WHERE t.id=$1 AND t.dialect=ANY($3::text[]) AND r.builtin AND r.name='ADMIN'
         FOR UPDATE OF o
     """,
         database_id,
         user,
-        dialect,
+        list(dialects),
     )
     if not row:
         raise HTTPException(
@@ -168,11 +197,12 @@ async def connect(
     try:
         async with conn.transaction():
             # Serialize with policy and ownership changes in the control plane.
-            row = await require_admin(conn, database_id, user, "postgres")
+            row = await require_admin(conn, database_id, user, REMOTE_DIALECTS)
             uri = payload.uri.get_secret_value()
-            check_uri(uri, config.target_hosts)
-            async with connection(uri) as target:
-                schema = await reflect(target)
+            dialect = row["dialect"]
+            check_remote_uri(uri, config.target_hosts, dialect)
+            async with remote_connection(uri, dialect) as target:
+                schema = await remote_reflection(target, dialect)
             encrypted = encrypt_uri(uri, config.encryption_key, database_id)
             await conn.execute(
                 """
@@ -209,15 +239,15 @@ async def schema(
     if kind == "csv-v1":
         reflected, _ = await run_in_threadpool(read_csv, uri)
     else:
-        async with connection(uri) as target:
-            reflected = await reflect(target)
+        async with remote_connection(uri, kind) as target:
+            reflected = await remote_reflection(target, kind)
     allowed = {
         t: {c: reflected[t][c] for c in cols if c in reflected[t]}
         for t, cols in policy["table_columns"].items()
         if t in reflected
     }
     return {
-        "dialect": "sqlite" if kind == "csv-v1" else "postgres",
+        "dialect": kind if kind in mysql.DIALECTS else compiler_options(uri, kind)["dialect"],
         "tables": {t: cols for t, cols in allowed.items() if cols},
         **(
             {"question_examples": question_examples(allowed.get("records", {}))}
@@ -303,11 +333,23 @@ async def execute_sql(database_id, user, config, target_info, submitted_sql):
                 **result,
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
             }
-        async with connection(uri) as target:
-            reflected = await reflect(target)
-            sql = compile_query(submitted_sql, reflected, policy)
+        async with remote_connection(uri, kind) as target:
+            reflected = await remote_reflection(target, kind)
+            sql = compile_query(submitted_sql, reflected, policy, **compiler_options(uri, kind))
             # Fail closed if the durable query-intent audit cannot be written.
             await audit_query(config, org, user, database_id)
+            if kind in mysql.DIALECTS:
+                result = await mysql.execute(target, sql)
+                if result is None:
+                    raise HTTPException(413, "The result exceeds 2 MB. Select fewer columns or rows.")
+                columns, rows = result
+                return {
+                    "columns": columns,
+                    "rows": rows,
+                    "row_count": len(rows),
+                    "sql": sql,
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
             # Bound response memory as well as row count.
             records = []
             size = 0
@@ -351,6 +393,10 @@ async def generate(
     if kind == "csv-v1":
         reflected, _ = await run_in_threadpool(read_csv, uri)
         edges = []
+    elif kind in mysql.DIALECTS:
+        async with remote_connection(uri, kind) as target:
+            reflected = await mysql.reflect(target)
+            edges = await mysql.foreign_keys(target)
     else:
         async with connection(uri) as target:
             reflected = await reflect(target)
@@ -365,7 +411,8 @@ async def generate(
                 AND b.relnamespace='public'::regnamespace
             """)
     try:
-        dialect = "sqlite" if kind == "csv-v1" else "postgres"
+        compile_options = compiler_options(uri, kind)
+        dialect = compile_options["dialect"]
         if kind == "csv-v1":
             columns = set(reflected["records"]).intersection(
                 policy["table_columns"].get("records", [])
@@ -398,11 +445,12 @@ async def generate(
                 422, "That column is unavailable for this question. Ask again to refresh the choices."
             )
         key = generation_key(
-            database_id, payload.question, config.ollama_model, reflected, policy, edges
+            database_id, payload.question, config.ollama_model, reflected, policy, edges,
+            **compile_options,
         )
         cached = await read_draft(key)
         if cached:
-            compile_query(cached, reflected, policy, dialect=dialect)
+            compile_query(cached, reflected, policy, **compile_options)
             return {
                 "sql": cached,
                 "provider": config.ollama_model,
@@ -412,6 +460,9 @@ async def generate(
             }
 
         async def check_plan(compiled):
+            if kind in mysql.DIALECTS:
+                async with remote_connection(uri, kind) as target:
+                    await mysql.validate_plan(target, compiled)
             if dialect == "postgres":
                 try:
                     async with connection(uri) as target:
@@ -424,6 +475,7 @@ async def generate(
         result = await draft(
             config, payload.question, reflected, policy, edges, check_plan,
             result_dialect=dialect,
+            source_schema=compile_options.get("source_schema"),
         )
         await store_draft(key, result["sql"])
         return {**result, "cache": "miss"}
@@ -453,7 +505,7 @@ async def import_csv(
     conn = await control(config)
     try:
         async with conn.transaction():
-            row = await require_admin(conn, database_id, user, "sqlite")
+            row = await require_admin(conn, database_id, user, ("sqlite",))
             parquet = request.headers.get("content-type", "").split(";")[0].strip().lower() == "application/vnd.apache.parquet"
             if parquet:
                 try:
