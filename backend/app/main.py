@@ -19,8 +19,10 @@ from sqlglot.optimizer.qualify import qualify
 app = FastAPI(title="MORPHY governed query engine", version="0.3.0")
 from .engine.api import router as engine_router
 from .engine.nl2sql import draft
+from .engine.ops_api import router as ops_router
 
 app.include_router(engine_router)
+app.include_router(ops_router)
 log = logging.getLogger("morphy")
 SCHEMA = {
     "orders": {"id": "INT", "customer_id": "INT", "product": "TEXT",

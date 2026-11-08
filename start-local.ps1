@@ -15,6 +15,8 @@ try {
   Copy-Item migrations/004_dashboards.sql supabase/migrations/00000000000004_dashboards.sql -Force
   Copy-Item migrations/005_account_lifecycle.sql supabase/migrations/00000000000005_account_lifecycle.sql -Force
   Copy-Item migrations/006_legacy_signup_trigger.sql supabase/migrations/00000000000006_legacy_signup_trigger.sql -Force
+  Copy-Item migrations/007_audit_stream_outbox.sql supabase/migrations/00000000000007_audit_stream_outbox.sql -Force
+  Copy-Item migrations/008_platform_operations.sql supabase/migrations/00000000000008_platform_operations.sql -Force
   Invoke-LocalCli start -x studio,realtime,edge-runtime,logflare,vector,supavisor,imgproxy,postgres-meta | Out-Null
   Invoke-LocalCli migration up --local
   # Forward only browser-safe values. Supabase status also contains admin secrets.

@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from fastapi.testclient import TestClient
@@ -82,6 +83,7 @@ def test_csv_salary_question_ranks_numbers_without_a_model(monkeypatch):
     }
     user, org, database = (uuid.uuid4() for _ in range(3))
     monkeypatch.setattr(api, "authorized_target", AsyncMock(return_value=(data, policy, org, "csv-v1")))
+    monkeypatch.setattr(api, "track_operation", lambda *args, **kwargs: nullcontext())
     model = AsyncMock(side_effect=AssertionError("Salary ranking should never call the model"))
     monkeypatch.setattr(api, "draft", model)
     monkeypatch.setattr(api, "audit_query", AsyncMock())
@@ -126,6 +128,7 @@ def test_csv_clarification_choices_and_examples_follow_current_permissions(monke
     }
     user, org, database = (uuid.uuid4() for _ in range(3))
     monkeypatch.setattr(api, "authorized_target", AsyncMock(return_value=(data, policy, org, "csv-v1")))
+    monkeypatch.setattr(api, "track_operation", lambda *args, **kwargs: nullcontext())
     model = AsyncMock(side_effect=AssertionError("This path must stay outside the model"))
     monkeypatch.setattr(api, "draft", model)
     monkeypatch.setattr(api, "audit_query", AsyncMock())

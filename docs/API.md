@@ -18,6 +18,8 @@ Profiles, organizations, invitations, roles and permission settings are exposed 
 | POST /engine/databases/{uuid}/generate | JSON question string | sql, provider, requires_execution, attempts, cache |
 | POST /engine/databases/{uuid}/query | JSON sql string | columns, rows, row_count, sql, elapsed_ms |
 
+The internal [platform operations API](OPERATIONS.md) uses the same session verification and requires a separate staff grant and MFA. Tenant clients should display the engine's suspension or quarantine messages for affected requests.
+
 Registered remote sources support PostgreSQL, MySQL and MariaDB. MySQL and MariaDB use their own URI schemes (`mysql://` or `mariadb://`) and the MySQL SQL dialect. Use a dedicated SELECT-only account, an application database with InnoDB base tables, a server allowlist entry in `MORPHY_TARGET_HOSTS`, and a publicly or locally trusted TLS certificate that matches the hostname. `sslmode=verify-full` is the default. Loopback-only test fixtures may set `sslmode=disable`. Views, system databases, cross-database references, session variables, file functions and optimizer hints are outside this connector's supported query surface. Row-policy equality uses binary comparison to prevent the target collation from widening a policy.
 
 Connection and import actions require an organization administrator. Query/schema/generation require QUERY_ONLY or SCHEMA_EDIT and explicit database permissions. An admin role alone does not create a data grant.
