@@ -755,8 +755,11 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
 
         # In sample mode: execute immediately
         if not ctx.client.is_live:
-            res_table = _execute_sql(ctx, generated["sql"])
-            return output + "\n\n" + res_table
+            try:
+                res_table = _execute_sql(ctx, generated["sql"])
+                return output + "\n\n" + res_table
+            except EngineError as err:
+                return output + f"\n\nQuery error: {err.detail}"
 
         # In live mode: Always display generated SQL first, then request confirmation
         print(output)
@@ -765,7 +768,10 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
         except (EOFError, KeyboardInterrupt):
             return "Cancelled."
         if confirm == "y":
-            return _execute_sql(ctx, generated["sql"])
+            try:
+                return _execute_sql(ctx, generated["sql"])
+            except EngineError as err:
+                return f"Query error: {err.detail}"
         return "(not executed)"
 
     # ── Direct SQL Execution ────────────────────────────────────────────
@@ -773,7 +779,10 @@ def _handle_command(ctx: ShellContext, line: str, session: Optional[PromptSessio
         sql = cmd[5:].strip()
         if not sql:
             return "Usage: /sql <SELECT ...>"
-        return _execute_sql(ctx, sql)
+        try:
+            return _execute_sql(ctx, sql)
+        except EngineError as err:
+            return f"Query error: {err.detail}"
 
     return "Unknown command. Use /sql followed by a SELECT query, or /help."
 

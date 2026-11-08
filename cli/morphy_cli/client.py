@@ -141,6 +141,8 @@ class MorphyClient:
                 detail = response.text
             hint = _STATUS_HINTS.get(response.status_code, "")
             message = str(detail)
+            if "suspended" in message.lower() or "suspension" in message.lower():
+                hint = ""
             if hint and hint not in message:
                 message = f"{message}\n{hint}"
             raise EngineError(response.status_code, message)

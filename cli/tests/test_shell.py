@@ -843,6 +843,46 @@ class TestHandleCommand:
             assert ctx.active_org_id is None
             assert ctx.active_db_id is None
 
+    def test_suspended_user_interactive_sql(self):
+        ctx = create_test_context(is_live=True)
+        suspension_msg = "Your account has been suspended: security review in progress (reason: suspicious query pattern)"
+        with patch.object(ctx.client, "query", side_effect=EngineError(403, suspension_msg)):
+            res = _handle_command(ctx, "/sql SELECT * FROM secret_table")
+            assert "Query error: " in res
+            assert "Your account has been suspended" in res
+            assert "security review in progress" in res
+
+    def test_suspended_user_interactive_ask(self):
+        ctx = create_test_context(is_live=True)
+        suspension_msg = "Your account has been suspended: security review in progress"
+        with patch.object(ctx.client, "generate", side_effect=EngineError(403, suspension_msg)):
+            res = _handle_command(ctx, "/ask show all data")
+            assert "Generation error: " in res
+            assert "Your account has been suspended" in res
+
+    def test_suspended_org_interactive_sql(self):
+        ctx = create_test_context(is_live=True)
+        suspension_msg = "Organization 'Acme Corp' has been suspended: compliance hold"
+        with patch.object(ctx.client, "query", side_effect=EngineError(403, suspension_msg)):
+            res = _handle_command(ctx, "/sql SELECT 1")
+            assert "Query error: " in res
+            assert "Organization 'Acme Corp' has been suspended" in res
+
+    def test_restored_user_resumes_access(self):
+        ctx = create_test_context(is_live=True)
+        suspension_msg = "Your account has been suspended"
+        # First query fails due to temporary suspension
+        with patch.object(ctx.client, "query", side_effect=EngineError(403, suspension_msg)):
+            res = _handle_command(ctx, "/sql SELECT 1")
+            assert "Your account has been suspended" in res
+
+        # After restoration by staff, next query with existing session immediately succeeds
+        valid_result = {"columns": ["num"], "rows": [[42]], "row_count": 1, "elapsed_ms": 1.2}
+        with patch.object(ctx.client, "query", return_value=valid_result):
+            res_after = _handle_command(ctx, "/sql SELECT 1")
+            assert "42" in res_after
+            assert "1 row" in res_after
+
 
 # ── Client & Entrypoint ─────────────────────────────────────────────
 
@@ -858,6 +898,20 @@ class TestClient:
         with patch.dict("os.environ", {"MORPHY_ACCESS_TOKEN": "token"}):
             with pytest.raises(SystemExit):
                 MorphyClient("http://remote.host:8000", UUID("12345678-1234-1234-1234-123456789abc"))
+
+    def test_client_preserves_suspension_message(self):
+        c = MorphyClient("http://127.0.0.1:8000")
+        mock_resp = MagicMock()
+        mock_resp.is_error = True
+        mock_resp.status_code = 403
+        mock_resp.json.return_value = {"detail": "Your account has been suspended by staff"}
+        with patch.object(c._http, "post", return_value=mock_resp):
+            with pytest.raises(EngineError) as exc:
+                c.query("SELECT 1")
+            assert "Your account has been suspended by staff" in str(exc.value)
+            # Generic permission hint should be suppressed for suspensions
+            assert "Check your database permissions" not in str(exc.value)
+        c.close()
 
 
 class TestMainEntrypoint:
@@ -881,6 +935,28 @@ class TestMainEntrypoint:
                 with pytest.raises(SystemExit) as exc:
                     main()
                 assert exc.value.code == 1
+
+    def test_suspended_user_scripting_exit_code(self, capsys):
+        suspension_msg = "Your account has been suspended: compliance audit"
+        with patch("sys.argv", ["morphy", "--sql", "SELECT 1"]):
+            with patch("morphy_cli.client.MorphyClient.query", side_effect=EngineError(403, suspension_msg)):
+                from morphy_cli.main import main
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 1
+                captured = capsys.readouterr()
+                assert "Your account has been suspended" in captured.err
+
+    def test_suspended_org_scripting_exit_code(self, capsys):
+        suspension_msg = "Organization 'Beta Corp' is suspended: billing overdue"
+        with patch("sys.argv", ["morphy", "--sql", "SELECT 1"]):
+            with patch("morphy_cli.client.MorphyClient.query", side_effect=EngineError(403, suspension_msg)):
+                from morphy_cli.main import main
+                with pytest.raises(SystemExit) as exc:
+                    main()
+                assert exc.value.code == 1
+                captured = capsys.readouterr()
+                assert "Organization 'Beta Corp' is suspended" in captured.err
 
     def test_sql_network_error_exit_code(self):
         import httpx
