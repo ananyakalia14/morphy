@@ -8,9 +8,11 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 
-def generation_key(database, question, model, schema, policy, edges):
+def generation_key(database, question, model, schema, policy, edges, *, dialect="postgres", source_schema=None):
     payload = [
-        "v2",
+        "v3",
+        dialect,
+        source_schema,
         str(database),
         question,
         model,

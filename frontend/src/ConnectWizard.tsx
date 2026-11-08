@@ -1,15 +1,10 @@
 import { useState } from "react";
-import { rpc } from "./client";
+import { remoteSources, rpc, type RemoteDialect } from "./client";
 import { engine } from "./LiveEngine";
 
-type Kind = "postgres" | "sqlite";
+type Kind = RemoteDialect | "sqlite";
 type Step = "choose" | "details" | "working" | "done";
 type Tables = Record<string, string[]>;
-
-const STAGES: Record<Kind, string[]> = {
-  postgres: ["Registering source", "Testing connection and discovering tables"],
-  sqlite: ["Registering source", "Importing file and reading columns"],
-};
 
 export function ConnectWizard({
   org,
@@ -30,6 +25,10 @@ export function ConnectWizard({
     [tables, setTables] = useState<Tables>({}),
     [sourceId, setSourceId] = useState(""),
     [failedAt, setFailedAt] = useState("");
+  const stages = [
+    "Registering source",
+    kind === "sqlite" ? "Importing file and reading columns" : "Testing connection and discovering tables",
+  ];
 
   function pickFile(f: File | undefined) {
     setError("");
@@ -67,7 +66,7 @@ export function ConnectWizard({
       }
       at = 1;
       setStage(1);
-      if (kind === "postgres") {
+      if (kind !== "sqlite") {
         const r = await engine<{ tables: number; schema?: Record<string, Record<string, string>> }>(
           id, "connection", { uri }, "PUT",
         );
@@ -94,7 +93,7 @@ export function ConnectWizard({
       setStep("done");
       onDone();
     } catch (e) {
-      setFailedAt(STAGES[kind][at]!);
+      setFailedAt(stages[at]!);
       setUri("");
       setError(e instanceof Error ? e.message : String(e));
       setStep("details");
@@ -129,17 +128,20 @@ export function ConnectWizard({
 
       {step === "choose" && (
         <div className="wizard-choices">
-          <button
-            type="button"
-            className="choice"
-            onClick={() => {
-              setKind("postgres");
-              setStep("details");
-            }}
-          >
-            <b>PostgreSQL</b>
-            <span>Live, read-only connection to your database.</span>
-          </button>
+          {(Object.keys(remoteSources) as RemoteDialect[]).map((dialect) => (
+            <button
+              key={dialect}
+              type="button"
+              className="choice"
+              onClick={() => {
+                setKind(dialect);
+                setStep("details");
+              }}
+            >
+              <b>{remoteSources[dialect].label}</b>
+              <span>Live, read-only connection to your database.</span>
+            </button>
+          ))}
           <button
             type="button"
             className="choice"
@@ -151,7 +153,7 @@ export function ConnectWizard({
             <b>CSV / Parquet import</b>
             <span>Upload one file, up to 1 MB and 20,000 rows.</span>
           </button>
-          {["MySQL", "MongoDB", "Snowflake", "BigQuery"].map((n) => (
+          {["MongoDB", "Snowflake", "BigQuery", "DuckDB", "ClickHouse"].map((n) => (
             <div key={n} className="choice soon" aria-disabled="true">
               <b>{n}</b>
               <span>Coming soon</span>
@@ -177,16 +179,16 @@ export function ConnectWizard({
               onChange={(e) => setName(e.target.value)}
             />
           </label>
-          {kind === "postgres" ? (
+          {kind !== "sqlite" ? (
             <label>
-              Read-only PostgreSQL connection URI
+              Read-only {remoteSources[kind].label} connection URI
               <input
                 type="password"
                 autoComplete="off"
                 required
                 value={uri}
                 onChange={(e) => setUri(e.target.value)}
-                placeholder="postgresql://user:password@host:5432/database?sslmode=require"
+                placeholder={remoteSources[kind].example}
               />
               <small>
                 Use a dedicated read-only user. Sent once to the engine, never
@@ -231,7 +233,7 @@ export function ConnectWizard({
               <p>{error}</p>
               {sourceId && (
                 <small>
-                  The source is already registered. {kind === "postgres" ? "Re-enter the connection URI and try again" : "Try the import again"} — it won't be registered twice.
+                  The source is already registered. {kind !== "sqlite" ? "Re-enter the connection URI and try again" : "Try the import again"} — it won't be registered twice.
                 </small>
               )}
             </div>
@@ -244,7 +246,7 @@ export function ConnectWizard({
               className="primary"
               disabled={kind === "sqlite" && !file}
             >
-              {error ? "Try again" : kind === "postgres" ? "Verify & connect" : "Import file"}
+              {error ? "Try again" : kind !== "sqlite" ? "Verify & connect" : "Import file"}
             </button>
           </div>
         </form>
@@ -252,7 +254,7 @@ export function ConnectWizard({
 
       {step === "working" && (
         <ul className="wizard-progress" role="status">
-          {STAGES[kind].map((l, i) => (
+          {stages.map((l, i) => (
             <li key={l} className={i < stage ? "ok" : i === stage ? "now" : ""}>
               {i < stage ? "✓" : i === stage ? "…" : "·"} {l}
             </li>

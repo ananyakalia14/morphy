@@ -2,7 +2,7 @@
 
 A governed natural-language database workspace with a FastAPI engine, a React website and a Python CLI.
 
-This repository is the shared source of truth for Codex, Antigravity and Lovable. The engine verifies Supabase sessions, loads effective database policies, validates SQL, and executes read-only requests. The current implementation supports PostgreSQL and encrypted CSV imports queried through SQLite.
+This repository is the shared source of truth for Codex, Antigravity and Lovable. The engine verifies Supabase sessions, loads effective database policies, validates SQL, and executes read-only requests. The engine supports PostgreSQL, MySQL, MariaDB and encrypted CSV imports queried through SQLite.
 
 ## Who builds what
 

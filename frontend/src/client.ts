@@ -42,6 +42,24 @@ export type Invite = {
   org_id: string;
 };
 export type Source = { id: string; name: string; dialect: string };
+export const remoteSources = {
+  postgres: {
+    label: "PostgreSQL",
+    example: "postgresql://user:password@host:5432/database?sslmode=require",
+  },
+  mysql: {
+    label: "MySQL",
+    example: "mysql://user:password@host:3306/database?sslmode=verify-full",
+  },
+  mariadb: {
+    label: "MariaDB",
+    example: "mariadb://user:password@host:3306/database?sslmode=verify-full",
+  },
+};
+export type RemoteDialect = keyof typeof remoteSources;
+export function remoteSource(dialect: string) {
+  return Object.hasOwn(remoteSources, dialect) ? remoteSources[dialect as RemoteDialect] : undefined;
+}
 export type Rule = { table: string; column: string; op: "eq"; value: string };
 export type Policy = {
   database_id: string;

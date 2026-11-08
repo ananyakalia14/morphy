@@ -71,7 +71,7 @@ def physical_tables(tree):
     return list(tables.values())
 
 
-def compile_query(sql, schema, policy, dialect="postgres"):
+def compile_query(sql, schema, policy, dialect="postgres", *, source_schema=None):
     if policy.get("mode") not in {"QUERY_ONLY", "SCHEMA_EDIT"}:
         raise PermissionError("Your current role cannot execute queries.")
     allowed = {}
@@ -87,6 +87,11 @@ def compile_query(sql, schema, policy, dialect="postgres"):
     ):
         raise ValueError("Submit exactly one read query.")
     tree = statements[0]
+    if dialect == "mysql":
+        if not source_schema:
+            raise ValueError("A target database must be selected.")
+        if any(tree.find_all(exp.Hint, exp.Parameter, exp.SessionParameter, exp.PropertyEQ, exp.Placeholder)):
+            raise ValueError("SQL hints and session variables are unsupported.")
     if any(with_.args.get("recursive") for with_ in tree.find_all(exp.With)) or any(
         tree.find_all(
             exp.DDL,
@@ -118,12 +123,15 @@ def compile_query(sql, schema, policy, dialect="postgres"):
     tree = qualify(tree, dialect=dialect, schema=allowed, validate_qualify_columns=True)
     for table in physical_tables(tree):
         name, alias = table.name, table.alias_or_name
+        if name not in allowed:
+            raise PermissionError("The query references a table outside your policy.")
         source = exp.select(*[exp.column(c, quoted=True) for c in allowed[name]])
         source = source.from_(
             exp.Table(
                 this=exp.to_identifier(name, quoted=True),
                 db=exp.to_identifier(
-                    "public" if dialect == "postgres" else "main", quoted=True
+                    source_schema or ("public" if dialect == "postgres" else "main"),
+                    quoted=True,
                 ),
             )
         )
@@ -143,11 +151,17 @@ def compile_query(sql, schema, policy, dialect="postgres"):
                 literal = exp.Literal.string(value)
             else:
                 raise PermissionError("A row policy value is invalid.")
-            source = source.where(exp.column(column, quoted=True).eq(literal))
+            field = exp.column(column, quoted=True)
+            if dialect == "mysql":
+                # MySQL's default collations can make an equality predicate
+                # match other cases or accents. Compare policy values by bytes.
+                field = exp.cast(field, "BINARY", dialect="mysql")
+                literal = exp.cast(literal, "BINARY", dialect="mysql")
+            source = source.where(field.eq(literal))
         table.replace(source.subquery(exp.to_identifier(alias, quoted=True)))
     return (
         exp.select("*")
         .from_(tree.subquery("governed"))
         .limit(1000)
-        .sql(dialect=dialect, pretty=True)
+        .sql(dialect=dialect, pretty=True, comments=dialect != "mysql")
     )
