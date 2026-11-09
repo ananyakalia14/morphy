@@ -23,7 +23,7 @@
 - Updated combined launcher requires a working Docker engine before its Supabase stage can be exercised.
 
 ## Original requirements still requiring implementation
-- Snowflake, BigQuery, DuckDB, ClickHouse and MongoDB connectors. The MySQL and MariaDB connectors require allowlisted targets and verified TLS for remote use.
+- Snowflake, BigQuery, ClickHouse and MongoDB connectors. DuckDB supports local operator-provisioned snapshots. MySQL and MariaDB require allowlisted targets and verified TLS for remote use.
 - Enable permission-scoped Redis semantic schema search and the Redis audit publisher in production. Fuzzy SQL reuse and Cuckoo-filter username acceleration remain open.
 - Dashboard layout/chart configuration and viewer-facing website/terminal integration (CLI integration completed with /dashboard).
 - Frontier-provider benchmark mode and opt-in egress controls.

@@ -42,7 +42,7 @@ export type Invite = {
   org_id: string;
 };
 export type Source = { id: string; name: string; dialect: string };
-export const remoteSources = {
+const connectionSources = {
   postgres: {
     label: "PostgreSQL",
     example: "postgresql://user:password@host:5432/database?sslmode=require",
@@ -55,11 +55,18 @@ export const remoteSources = {
     label: "MariaDB",
     example: "mariadb://user:password@host:3306/database?sslmode=verify-full",
   },
+  duckdb: {
+    label: "DuckDB",
+    example: "duckdb:///orders.duckdb",
+  },
 };
-export type RemoteDialect = keyof typeof remoteSources;
-export function remoteSource(dialect: string) {
-  return Object.hasOwn(remoteSources, dialect) ? remoteSources[dialect as RemoteDialect] : undefined;
+export type ConnectionDialect = keyof typeof connectionSources;
+export function connectionSource(dialect: string) {
+  if (dialect === "duckdb" && import.meta.env["VITE_ENABLE_DUCKDB"] !== "1") return;
+  return Object.hasOwn(connectionSources, dialect) ? connectionSources[dialect as ConnectionDialect] : undefined;
 }
+export const connectionChoices = (Object.keys(connectionSources) as ConnectionDialect[])
+  .filter(connectionSource);
 export type Rule = { table: string; column: string; op: "eq"; value: string };
 export type Policy = {
   database_id: string;

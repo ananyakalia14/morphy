@@ -9,7 +9,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, SecretStr
 from sqlglot.errors import SqlglotError
 from .config import Settings
-from . import mysql
+from . import duckdb_source, mysql
 from .security import check_uri, encrypt_uri, decrypt_uri, compile_query
 from .postgres import connection, reflect
 from .nl2sql import draft
@@ -30,6 +30,12 @@ class EngineRoute(APIRoute):
                 return await handler(request)
             except mysql.ConfigurationError as error:
                 raise HTTPException(422, str(error)) from error
+            except duckdb_source.NotConfigured as error:
+                raise HTTPException(503, str(error)) from error
+            except duckdb_source.SnapshotMissing as error:
+                raise HTTPException(409, str(error)) from error
+            except duckdb_source.ResultTooLarge:
+                raise HTTPException(413, "The result exceeds 2 MB. Select fewer columns or rows.")
             except (asyncpg.PostgresError, OSError, TimeoutError):
                 raise HTTPException(
                     502,
@@ -41,6 +47,7 @@ class EngineRoute(APIRoute):
 
 router = APIRouter(prefix="/api/engine", tags=["Live query engine"], route_class=EngineRoute)
 REMOTE_DIALECTS = {"postgres", *mysql.DIALECTS}
+CONNECTION_DIALECTS = REMOTE_DIALECTS | {"duckdb"}
 
 
 def remote_connection(uri, kind):
@@ -54,6 +61,8 @@ def remote_reflection(target, kind):
 def compiler_options(uri, kind):
     if kind in mysql.DIALECTS:
         return {"dialect": "mysql", "source_schema": mysql.database_name(uri)}
+    if kind == "duckdb":
+        return {"dialect": "duckdb"}
     return {"dialect": "sqlite" if kind == "csv-v1" else "postgres"}
 
 
@@ -133,7 +142,7 @@ async def authorized_target(database_id, user, config, *, viewing_panel=False):
                 WHERE t.id=$1 AND t.dialect=ANY($2::text[])
             """,
                 database_id,
-                [*REMOTE_DIALECTS, "sqlite"],
+                [*CONNECTION_DIALECTS, "sqlite"],
             )
             if not row:
                 raise HTTPException(
@@ -156,10 +165,13 @@ async def authorized_target(database_id, user, config, *, viewing_panel=False):
                 )
             if expected_version == "aesgcm-v1":
                 try:
-                    check_remote_uri(uri, config.target_hosts, row["dialect"])
+                    if row["dialect"] == "duckdb":
+                        duckdb_source.snapshot_path(uri, database_id)
+                    else:
+                        check_remote_uri(uri, config.target_hosts, row["dialect"])
                 except ValueError:
                     raise HTTPException(409, "This source must be configured again.") from None
-            kind = row["dialect"] if row["dialect"] in mysql.DIALECTS else expected_version
+            kind = row["dialect"] if row["dialect"] not in {"postgres", "sqlite"} else expected_version
             return uri, policy, row["org_id"], kind
     finally:
         await conn.close()
@@ -197,12 +209,16 @@ async def connect(
     try:
         async with conn.transaction():
             # Serialize with policy and ownership changes in the control plane.
-            row = await require_admin(conn, database_id, user, REMOTE_DIALECTS)
+            row = await require_admin(conn, database_id, user, CONNECTION_DIALECTS)
             uri = payload.uri.get_secret_value()
             dialect = row["dialect"]
-            check_remote_uri(uri, config.target_hosts, dialect)
-            async with remote_connection(uri, dialect) as target:
-                schema = await remote_reflection(target, dialect)
+            if dialect == "duckdb":
+                path = duckdb_source.snapshot_path(uri, database_id)
+                schema, _ = await run_in_threadpool(duckdb_source.inspect, path)
+            else:
+                check_remote_uri(uri, config.target_hosts, dialect)
+                async with remote_connection(uri, dialect) as target:
+                    schema = await remote_reflection(target, dialect)
             encrypted = encrypt_uri(uri, config.encryption_key, database_id)
             await conn.execute(
                 """
@@ -238,6 +254,9 @@ async def schema(
     uri, policy, _, kind = await authorized_target(database_id, user, config)
     if kind == "csv-v1":
         reflected, _ = await run_in_threadpool(read_csv, uri)
+    elif kind == "duckdb":
+        path = duckdb_source.snapshot_path(uri, database_id)
+        reflected, _ = await run_in_threadpool(duckdb_source.inspect, path)
     else:
         async with remote_connection(uri, kind) as target:
             reflected = await remote_reflection(target, kind)
@@ -326,9 +345,13 @@ async def execute_sql(database_id, user, config, target_info, submitted_sql):
     uri, policy, org, kind = target_info
     started = time.perf_counter()
     try:
-        if kind == "csv-v1":
+        if kind in {"csv-v1", "duckdb"}:
             await audit_query(config, org, user, database_id)
-            result = await run_in_threadpool(execute_csv, uri, policy, submitted_sql)
+            if kind == "duckdb":
+                path = duckdb_source.snapshot_path(uri, database_id)
+                result = await run_in_threadpool(duckdb_source.execute, path, policy, submitted_sql)
+            else:
+                result = await run_in_threadpool(execute_csv, uri, policy, submitted_sql)
             return {
                 **result,
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
@@ -393,6 +416,11 @@ async def generate(
     if kind == "csv-v1":
         reflected, _ = await run_in_threadpool(read_csv, uri)
         edges = []
+    elif kind == "duckdb":
+        duckdb_path = duckdb_source.snapshot_path(uri, database_id)
+        reflected, edges = await run_in_threadpool(
+            duckdb_source.inspect, duckdb_path, include_edges=True,
+        )
     elif kind in mysql.DIALECTS:
         async with remote_connection(uri, kind) as target:
             reflected = await mysql.reflect(target)
@@ -460,6 +488,8 @@ async def generate(
             }
 
         async def check_plan(compiled):
+            if kind == "duckdb":
+                await run_in_threadpool(duckdb_source.validate_plan, duckdb_path, compiled)
             if kind in mysql.DIALECTS:
                 async with remote_connection(uri, kind) as target:
                     await mysql.validate_plan(target, compiled)

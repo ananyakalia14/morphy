@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { remoteSources, rpc, type RemoteDialect } from "./client";
+import { connectionChoices, connectionSource, rpc, type ConnectionDialect } from "./client";
 import { engine } from "./LiveEngine";
 
-type Kind = RemoteDialect | "sqlite";
+type Kind = ConnectionDialect | "sqlite";
 type Step = "choose" | "details" | "working" | "done";
 type Tables = Record<string, string[]>;
 
@@ -29,6 +29,8 @@ export function ConnectWizard({
     "Registering source",
     kind === "sqlite" ? "Importing file and reading columns" : "Testing connection and discovering tables",
   ];
+  const registeringSnapshot = kind === "duckdb" && !sourceId;
+  const connectionDetails = connectionSource(kind);
 
   function pickFile(f: File | undefined) {
     setError("");
@@ -63,6 +65,10 @@ export function ConnectWizard({
       if (!id) {
         id = await rpc<string>("register_database", { o: org, title: name, engine: kind });
         setSourceId(id);
+        if (kind === "duckdb") {
+          setStep("details");
+          return;
+        }
       }
       at = 1;
       setStage(1);
@@ -128,7 +134,7 @@ export function ConnectWizard({
 
       {step === "choose" && (
         <div className="wizard-choices">
-          {(Object.keys(remoteSources) as RemoteDialect[]).map((dialect) => (
+          {connectionChoices.map((dialect) => (
             <button
               key={dialect}
               type="button"
@@ -138,8 +144,8 @@ export function ConnectWizard({
                 setStep("details");
               }}
             >
-              <b>{remoteSources[dialect].label}</b>
-              <span>Live, read-only connection to your database.</span>
+              <b>{connectionSource(dialect)?.label}</b>
+              <span>{dialect === "duckdb" ? "Read-only snapshot provisioned on this engine." : "Live, read-only connection to your database."}</span>
             </button>
           ))}
           <button
@@ -153,7 +159,7 @@ export function ConnectWizard({
             <b>CSV / Parquet import</b>
             <span>Upload one file, up to 1 MB and 20,000 rows.</span>
           </button>
-          {["MongoDB", "Snowflake", "BigQuery", "DuckDB", "ClickHouse"].map((n) => (
+          {["MongoDB", "Snowflake", "BigQuery", "ClickHouse"].map((n) => (
             <div key={n} className="choice soon" aria-disabled="true">
               <b>{n}</b>
               <span>Coming soon</span>
@@ -179,16 +185,27 @@ export function ConnectWizard({
               onChange={(e) => setName(e.target.value)}
             />
           </label>
-          {kind !== "sqlite" ? (
+          {registeringSnapshot ? (
+            <p>Register the source to get its snapshot folder name.</p>
+          ) : kind === "duckdb" ? (
             <label>
-              Read-only {remoteSources[kind].label} connection URI
+              DuckDB snapshot URI
+              <input required value={uri} onChange={(e) => setUri(e.target.value)} placeholder={connectionDetails?.example} />
+              <small>
+                Place a trusted snapshot in the engine's DuckDB folder under <code>{sourceId}</code>,
+                then enter its filename as a DuckDB URI.
+              </small>
+            </label>
+          ) : kind !== "sqlite" ? (
+            <label>
+              Read-only {connectionDetails?.label} connection URI
               <input
                 type="password"
                 autoComplete="off"
                 required
                 value={uri}
                 onChange={(e) => setUri(e.target.value)}
-                placeholder={remoteSources[kind].example}
+                placeholder={connectionDetails?.example}
               />
               <small>
                 Use a dedicated read-only user. Sent once to the engine, never
@@ -246,7 +263,7 @@ export function ConnectWizard({
               className="primary"
               disabled={kind === "sqlite" && !file}
             >
-              {error ? "Try again" : kind !== "sqlite" ? "Verify & connect" : "Import file"}
+              {error ? "Try again" : registeringSnapshot ? "Register DuckDB source" : kind !== "sqlite" ? "Verify & connect" : "Import file"}
             </button>
           </div>
         </form>
