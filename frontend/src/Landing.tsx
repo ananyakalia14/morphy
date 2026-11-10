@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useReducedMotion } from "./Motion";
 import { ProductStory } from "./ProductStory";
 import { SiteFooter } from "./SiteFooter";
@@ -6,11 +6,11 @@ import { CliPromoSection } from "./CliPromoSection";
 import "./landing-motion.css";
 
 const SECTIONS = [
-  ["#workflow", "How it works"],
-  ["#connectors", "Connectors"],
-  ["#terminal", "Terminal"],
-  ["#research", "Research"],
-  ["#explore", "Try a query"],
+  ["#workflow", "How it works", "falcon"],
+  ["#connectors", "Connectors", "crocodile"],
+  ["#terminal", "Terminal", "horse"],
+  ["#research", "Research", "elephant"],
+  ["#explore", "Try a query", "duck"],
 ] as const;
 
 const SOURCES = [
@@ -87,13 +87,45 @@ function PixelTrail() {
   return <div ref={root} className="motion-pixels" aria-hidden="true">{TRAIL.map((i) => <i key={i} />)}</div>;
 }
 
-function LandingNavigation({ signin }: { signin: () => void }) {
+function LandingNavigation({ signin, animate }: { signin: () => void; animate: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
+  const closing = useRef<Animation | null>(null);
   const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState(0);
 
-  function closeMenu() {
-    dialog.current?.close();
+  useEffect(() => () => closing.current?.cancel(), []);
+
+  function openMenu() {
+    const node = dialog.current;
+    const button = toggle.current;
+    if (!node || !button || node.open) return;
+    const { x, y, width, height } = button.getBoundingClientRect();
+    node.style.setProperty("--menu-origin", `${x + width / 2}px ${y + height / 2}px`);
+    setPreview(0);
+    node.showModal();
+    setOpen(true);
+  }
+
+  function closeMenu(destination?: string) {
+    const node = dialog.current;
+    if (!node?.open || closing.current) return;
+    function finish() {
+      closing.current = null;
+      dialog.current?.close();
+      if (!destination) return;
+      if (location.hash !== destination) location.hash = destination;
+      else document.getElementById(destination.slice(1))?.scrollIntoView();
+    }
+    if (!animate) {
+      finish();
+      return;
+    }
+    closing.current = node.animate([
+      { clipPath: getComputedStyle(node).clipPath },
+      { clipPath: "circle(0% at var(--menu-origin))" },
+    ], { duration: 450, easing: "cubic-bezier(.67, 0, .86, .33)", fill: "forwards" });
+    void closing.current.finished.then(finish, () => {});
   }
 
   return (
@@ -108,7 +140,7 @@ function LandingNavigation({ signin }: { signin: () => void }) {
           className="motion-menu-toggle"
           aria-expanded={open}
           aria-controls="morphy-navigation"
-          onClick={() => { dialog.current?.showModal(); setOpen(true); }}
+          onClick={openMenu}
         >
           <span className="motion-menu-bars" aria-hidden="true" /> Menu
         </button>
@@ -118,23 +150,32 @@ function LandingNavigation({ signin }: { signin: () => void }) {
         ref={dialog}
         className="motion-menu"
         aria-labelledby="motion-menu-title"
-        onClose={() => { setOpen(false); toggle.current?.focus({ preventScroll: true }); }}
+        onCancel={(event) => { event.preventDefault(); closeMenu(); }}
+        onClose={() => {
+          dialog.current?.getAnimations().forEach((animation) => animation.cancel());
+          setOpen(false);
+          toggle.current?.focus({ preventScroll: true });
+        }}
       >
         <div className="motion-menu-top">
           <span id="motion-menu-title" className="motion-brand">MORPHY<span>■</span></span>
-          <button type="button" className="motion-menu-close" onClick={closeMenu} autoFocus>Close <span aria-hidden="true">×</span></button>
+          <button type="button" className="motion-menu-close" onClick={() => closeMenu()} autoFocus>Close <span aria-hidden="true">×</span></button>
         </div>
         <div className="motion-menu-content">
           <nav aria-label="Site sections">
             {SECTIONS.map(([href, label], i) => (
-              <a key={href} href={href} onClick={closeMenu} style={{ "--motion-index": i } as CSSProperties}>
+              <a key={href} href={href} onPointerEnter={() => setPreview(i)} onFocus={() => setPreview(i)} onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                closeMenu(href);
+              }} style={{ "--motion-index": i } as CSSProperties}>
                 <small>0{i + 1}</small><span>{label}</span><b aria-hidden="true">↗</b>
               </a>
             ))}
           </nav>
           <div className="motion-menu-note">
-            <img src="/motion/falcon.svg" alt="" width="380" height="220" />
-            <p>THE POLYGLOT DATA WORKSPACE</p>
+            <img key={preview} src={`/motion/${SECTIONS[preview]![2]}.svg`} alt="" width="380" height="220" />
+            <p>0{preview + 1} / {SECTIONS[preview]![1].toUpperCase()}</p>
           </div>
         </div>
       </dialog>
@@ -173,20 +214,7 @@ function MorphArtwork({ animate }: { animate: boolean }) {
   return (
     <figure className="motion-specimen">
       <div className="motion-specimen-top"><span><i /> MORPH SEQUENCE</span><span>FIG. 01</span></div>
-      <div
-        className="motion-specimen-stage"
-        onPointerMove={(event) => {
-          if (!animate || event.pointerType !== "mouse") return;
-          const stage = event.currentTarget;
-          const bounds = stage.getBoundingClientRect();
-          stage.style.setProperty("--specimen-x", `${((event.clientX - bounds.left) / bounds.width - .5) * 12}px`);
-          stage.style.setProperty("--specimen-y", `${((event.clientY - bounds.top) / bounds.height - .5) * 12}px`);
-        }}
-        onPointerLeave={(event) => {
-          event.currentTarget.style.removeProperty("--specimen-x");
-          event.currentTarget.style.removeProperty("--specimen-y");
-        }}
-      >
+      <div className="motion-specimen-stage">
         <div className="motion-specimen-grid" aria-hidden="true" />
         <img src="/motion/bull.svg" alt="MORPHY lettering shaped into a bull" fetchPriority="high" />
         {loaded && (
@@ -214,28 +242,79 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
   const reduced = useReducedMotion();
   const [paused, setPaused] = useState(false);
   const animate = !reduced && !paused;
+  const hero = useRef<HTMLElement>(null);
+  const sources = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const lead = hero.current;
+    const rail = sources.current;
+    const pin = rail?.querySelector<HTMLElement>(".motion-source-pin");
+    const track = rail?.querySelector<HTMLElement>(".motion-source-grid");
+    if (!animate || !lead || !rail || !pin || !track) return;
+    const wide = matchMedia("(min-width: 850px) and (min-height: 600px)");
+    let frame = 0;
+    const clamp = (value: number) => Math.max(0, Math.min(1, value));
+    const update = () => {
+      frame = 0;
+      const leadBox = lead.getBoundingClientRect();
+      const progress = clamp(-leadBox.top / Math.max(1, leadBox.height * .7));
+      lead.style.setProperty("--hero-scroll", String(progress));
+      if (!wide.matches) return;
+      const railBox = rail.getBoundingClientRect();
+      const pinTop = Number.parseFloat(getComputedStyle(pin).top) || 0;
+      const railProgress = clamp((pinTop - railBox.top) / Math.max(1, railBox.height - pin.offsetHeight));
+      const travel = Math.max(0, track.scrollWidth - track.clientWidth);
+      rail.style.setProperty("--source-x", `${-travel * railProgress}px`);
+      rail.style.setProperty("--source-progress", String(railProgress));
+    };
+    const queue = () => { if (!frame) frame = requestAnimationFrame(update); };
+    window.addEventListener("scroll", queue, { passive: true });
+    window.addEventListener("resize", queue);
+    queue();
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", queue);
+      window.removeEventListener("resize", queue);
+      lead.style.removeProperty("--hero-scroll");
+      rail.style.removeProperty("--source-x");
+      rail.style.removeProperty("--source-progress");
+    };
+  }, [animate]);
+
+  function shiftHero(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!animate || event.pointerType !== "mouse") return;
+    const stage = event.currentTarget;
+    const { left, top, width, height } = stage.getBoundingClientRect();
+    stage.style.setProperty("--stage-x", `${(event.clientX - left) / width - .5}`);
+    stage.style.setProperty("--stage-y", `${(event.clientY - top) / height - .5}`);
+  }
 
   return (
     <div className={`landing motion-landing${animate ? "" : " motion-disabled"}`} id="top">
       {animate && <PixelTrail />}
       <a className="skip-link" href="#main">Skip to content</a>
-      <LandingNavigation signin={signin} />
+      <LandingNavigation signin={signin} animate={animate} />
       <main id="main" tabIndex={-1}>
-        <section className="motion-hero" aria-labelledby="motion-hero-title">
+        <section className="motion-hero" ref={hero} aria-labelledby="motion-hero-title">
           <div className="hero-copy motion-copy">
             <div className="motion-kicker motion-rise" style={{ "--motion-index": 0 } as CSSProperties}><i /> THE POLYGLOT DATA WORKSPACE</div>
-            <h1 id="motion-hero-title" aria-label="Data takes shape.">
-              <span className="motion-rise" style={{ "--motion-index": 1 } as CSSProperties} aria-hidden="true">DATA</span>
-              <span className="motion-rise" style={{ "--motion-index": 2 } as CSSProperties} aria-hidden="true">TAKES</span>
-              <span className="motion-rise" style={{ "--motion-index": 3 } as CSSProperties} aria-hidden="true">SHAPE.</span>
-            </h1>
-            <p className="motion-rise" style={{ "--motion-index": 4 } as CSSProperties}>Ask questions across your databases, review the SQL, and share answers within the access rules your team sets.</p>
-            <div className="motion-hero-actions motion-rise" style={{ "--motion-index": 5 } as CSSProperties}>
-              <button className="primary motion-primary" type="button" onClick={start}>Create workspace <b aria-hidden="true">↗</b></button>
-              <a className="motion-text-link" href="#explore">Try a sample query <span aria-hidden="true">→</span></a>
+            <div className="motion-stage" onPointerMove={shiftHero} onPointerLeave={(event) => {
+              event.currentTarget.style.removeProperty("--stage-x");
+              event.currentTarget.style.removeProperty("--stage-y");
+            }}>
+              <h1 id="motion-hero-title" aria-label="Data takes shape.">
+                {["DATA", "TAKES", "SHAPE."].map((word, i) => <span key={word} className="motion-title-line" aria-hidden="true"><span className="motion-title-mask" style={{ "--motion-index": i } as CSSProperties}>{word}</span></span>)}
+              </h1>
+              <MorphArtwork animate={animate} />
+            </div>
+            <div className="motion-hero-bottom">
+              <p className="motion-rise" style={{ "--motion-index": 4 } as CSSProperties}>Ask questions across your databases, review the SQL, and share answers within the access rules your team sets.</p>
+              <div className="motion-hero-actions motion-rise" style={{ "--motion-index": 5 } as CSSProperties}>
+                <button className="primary motion-primary" type="button" onClick={start}>Create workspace <b aria-hidden="true">↗</b></button>
+                <a className="motion-text-link" href="#explore">Try a sample query <span aria-hidden="true">→</span></a>
+              </div>
             </div>
           </div>
-          <MorphArtwork animate={animate} />
           <div className="motion-hero-meta">
             <a href="#workflow" className="motion-text-link">See how it works <span aria-hidden="true">↓</span></a>
             {!reduced && <button type="button" className="motion-pause" onClick={() => setPaused((value) => !value)}>{paused ? "Play motion" : "Pause motion"} <span aria-hidden="true">{paused ? "▷" : "Ⅱ"}</span></button>}
@@ -250,15 +329,20 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
 
         <ProductStory />
 
-        <section id="connectors" className="motion-sources motion-wrap" aria-labelledby="motion-sources-title">
-          <div className="motion-section-heading">
-            <p className="motion-kicker"><i /> 02 / DATA SOURCES</p>
-            <h2 id="motion-sources-title">Start with the data you have.</h2>
-            <p>Connect a read-only database or import a CSV. Set which tables, columns, and rows each role can query.</p>
+        <section id="connectors" ref={sources} className="motion-sources" aria-labelledby="motion-sources-title">
+          <div className="motion-source-pin motion-wrap">
+            <div className="motion-section-heading">
+              <p className="motion-kicker"><i /> 02 / DATA SOURCES</p>
+              <h2 id="motion-sources-title">Start with the data you have.</h2>
+              <p>Connect a read-only database or import a CSV. Set which tables, columns, and rows each role can query.</p>
+            </div>
+            <div className="motion-source-window">
+              <ul className="motion-source-grid">
+                {SOURCES.map(([initials, name, mode], i) => <li key={name}><span className="motion-source-chip" aria-hidden="true">{initials}</span><span className="motion-source-number" aria-hidden="true">0{i + 1} / 04</span><h3>{name}</h3><p>{mode}</p></li>)}
+              </ul>
+            </div>
+            <div className="motion-source-progress" aria-hidden="true"><span /></div>
           </div>
-          <ul className="motion-source-grid">
-            {SOURCES.map(([initials, name, mode]) => <li key={name}><span className="motion-source-chip" aria-hidden="true">{initials}</span><h3>{name}</h3><p>{mode}</p></li>)}
-          </ul>
         </section>
 
         <section id="terminal" className="landing-cli-section motion-terminal" aria-label="MORPHY command line">
