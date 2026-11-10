@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useConstrainedConnection } from "./connection";
 const names = [
   "Bull",
   "Duck",
@@ -25,23 +26,17 @@ export function AnimalMorphLoader({
 }: {
   label?: string;
 }) {
+  const reduced = useReducedMotion();
+  const constrained = useConstrainedConnection();
   const [failed, setFailed] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.playbackRate = 1.0;
-      videoRef.current.play().catch(() => {});
-    }
-  }, []);
 
   return (
     <div className="wait" role="status">
-      {failed ? (
+      {failed || reduced || constrained ? (
         <img src="/motion/bull.svg" alt="" />
       ) : (
         <video
-          ref={videoRef}
+          aria-hidden="true"
           autoPlay
           loop
           muted
@@ -61,18 +56,19 @@ export function AnimalMorphLoader({
     </div>
   );
 }
-export function Intro({ close }: { close: () => void }) {
+export function Intro({ close }: { close: (focusHero?: boolean) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [exiting, setExiting] = useState(false);
   const exitingRef = useRef(false);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const startupTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const finish = useCallback(() => {
     if (exitingRef.current) return;
     exitingRef.current = true;
+    clearTimeout(startupTimer.current);
     setExiting(true);
-    setTimeout(() => {
-      close();
-    }, 450);
+    exitTimer.current = setTimeout(close, 450);
   }, [close]);
 
   const applyRate = useCallback(() => {
@@ -88,21 +84,23 @@ export function Intro({ close }: { close: () => void }) {
     }
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "Enter" || e.key === " ") {
+      if (e.key === "Escape") {
         finish();
       }
     };
     window.addEventListener("keydown", onKey);
 
-    // Intro master length is 8s; at 1.2x it finishes in ~6.67s.
-    // Fallback safety timer transitions to landing if events are missed:
+    // Let the website open if video playback cannot start promptly.
+    startupTimer.current = setTimeout(() => close(false), 1250);
     const timer = setTimeout(finish, 7500);
 
     return () => {
       clearTimeout(timer);
+      clearTimeout(startupTimer.current);
+      clearTimeout(exitTimer.current);
       window.removeEventListener("keydown", onKey);
     };
-  }, [applyRate, finish]);
+  }, [applyRate, close, finish]);
 
   return (
     <div
@@ -114,18 +112,21 @@ export function Intro({ close }: { close: () => void }) {
     >
       <video
         ref={videoRef}
-        src="/motion/NEWINTRO.mp4"
+        src="/motion/intro-web.mp4"
         autoPlay
         muted
         playsInline
         preload="auto"
+        aria-hidden="true"
         onLoadedMetadata={applyRate}
         onPlay={applyRate}
+        onPlaying={() => clearTimeout(startupTimer.current)}
         onEnded={finish}
-        onError={finish}
-      >
-        <source src="/motion/NEWINTRO.mp4" type="video/mp4" />
-      </video>
+        onError={() => close(false)}
+      />
+      <button type="button" className="motion-intro-skip" onClick={finish} autoFocus>
+        Skip intro <span aria-hidden="true">↗</span>
+      </button>
     </div>
   );
 }

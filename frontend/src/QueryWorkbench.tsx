@@ -1,6 +1,6 @@
-const ENGINE: string = import.meta.env["VITE_ENGINE_URL"] || "/api";
 import { useEffect, useState } from "react";
 import { AnimalMorphLoader } from "./Motion";
+import { ENGINE_BASE } from "./engineBase";
 
 type Metadata = {
   name: string;
@@ -19,90 +19,8 @@ type Result = {
   row_cap: number;
 };
 
-const SAMPLE_METADATA: Metadata = {
-  name: "Commerce",
-  dialect: "SQLite",
-  tables: {
-    orders: {
-      id: "INTEGER PRIMARY KEY",
-      customer_id: "INTEGER",
-      product: "TEXT",
-      amount: "REAL",
-      status: "TEXT",
-      region: "TEXT",
-      created_at: "DATETIME",
-    },
-    customers: {
-      id: "INTEGER PRIMARY KEY",
-      name: "TEXT",
-      email: "TEXT (MASKED)",
-      country: "TEXT",
-      tier: "TEXT",
-    },
-    products: {
-      id: "INTEGER PRIMARY KEY",
-      title: "TEXT",
-      category: "TEXT",
-      price: "REAL",
-      inventory: "INTEGER",
-    },
-  },
-  examples: [
-    "Revenue by product",
-    "Top customers by total spend",
-    "Orders in APAC region by status",
-    "High-value pending transactions",
-  ],
-  generation: "qwen2.5-coder:7b",
-};
-
-const DEMO_QUERY_RESULTS: Record<string, Result> = {
-  default: {
-    id: "req_demo_882",
-    columns: ["product", "revenue"],
-    rows: [
-      ["Quantum Cloud Node", 148920.5],
-      ["Neural Mesh Engine", 92450.0],
-      ["Vector Stream Gateway", 64120.75],
-      ["Edge Tensor Core", 41800.2],
-      ["Distributed Cache Ultra", 27300.0],
-    ],
-    sql: "SELECT product, ROUND(SUM(amount), 2) AS revenue\nFROM orders\nWHERE status = 'paid'\nGROUP BY product\nORDER BY revenue DESC",
-    elapsed_ms: 18,
-    row_count: 5,
-    row_cap: 100,
-  },
-  customers: {
-    id: "req_demo_883",
-    columns: ["customer", "country", "total_spend"],
-    rows: [
-      ["Atlas Global Logistics", "Singapore", 214500.0],
-      ["Pacific Nexus AI", "Japan", 189200.5],
-      ["Meridian Digital", "Australia", 143800.0],
-      ["Apex Systems APAC", "South Korea", 98400.25],
-    ],
-    sql: "SELECT c.name AS customer, c.country, ROUND(SUM(o.amount), 2) AS total_spend\nFROM customers c\nJOIN orders o ON c.id = o.customer_id\nGROUP BY c.id\nORDER BY total_spend DESC\nLIMIT 5",
-    elapsed_ms: 22,
-    row_count: 4,
-    row_cap: 100,
-  },
-  orders: {
-    id: "req_demo_884",
-    columns: ["region", "status", "order_count", "total_amount"],
-    rows: [
-      ["APAC", "paid", 842, 492000.0],
-      ["APAC", "pending", 38, 24500.5],
-      ["APAC", "refunded", 12, 6800.0],
-    ],
-    sql: "SELECT region, status, COUNT(*) AS order_count, ROUND(SUM(amount), 2) AS total_amount\nFROM orders\nWHERE region = 'APAC'\nGROUP BY region, status",
-    elapsed_ms: 15,
-    row_count: 3,
-    row_cap: 100,
-  },
-};
-
 async function api<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(ENGINE + "/" + path, {
+  const response = await fetch(ENGINE_BASE + "/" + path, {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : null,
@@ -120,20 +38,15 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export function QueryWorkbench({ back }: { back: () => void }) {
-  const [meta, setMeta] = useState<Metadata>(SAMPLE_METADATA);
+  const [meta, setMeta] = useState<Metadata>();
   const [error, setError] = useState("");
   const [sql, setSql] = useState(
     "SELECT product, ROUND(SUM(amount), 2) AS revenue\nFROM orders\nWHERE status = 'paid'\nGROUP BY product\nORDER BY revenue DESC",
   );
-  const [result, setResult] = useState<Result | undefined>(DEMO_QUERY_RESULTS.default);
+  const [result, setResult] = useState<Result>();
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("Results");
-  const [history, setHistory] = useState<{ title: string; sql: string }[]>([
-    {
-      title: "Revenue by product",
-      sql: "SELECT product, ROUND(SUM(amount), 2) AS revenue\nFROM orders\nWHERE status = 'paid'\nGROUP BY product\nORDER BY revenue DESC",
-    },
-  ]);
+  const [history, setHistory] = useState<{ title: string; sql: string }[]>([]);
   const [question, setQuestion] = useState("Revenue by product");
   const [customQuestion, setCustomQuestion] = useState("");
   const custom = question === "custom";
@@ -149,10 +62,7 @@ export function QueryWorkbench({ back }: { back: () => void }) {
         }
       })
       .catch(() => {
-        // Fallback to local sample schema when backend is not running
-        if (alive) {
-          setMeta(SAMPLE_METADATA);
-        }
+        if (alive) setError("The sample query service is unavailable. Try reconnecting.");
       });
     return () => {
       alive = false;
@@ -160,42 +70,27 @@ export function QueryWorkbench({ back }: { back: () => void }) {
   }, [retry]);
 
   async function execute(candidate = sql, title = "SQL query") {
-    if (busy) return;
+    if (busy || !meta || !candidate.trim()) return;
     setBusy(true);
     setError("");
+    setResult(undefined);
     try {
       const data = await api<Result>("sample/query", { sql: candidate });
       setResult(data);
       setTab("Results");
       setHistory((old) => [{ title, sql: candidate }, ...old].slice(0, 12));
-    } catch {
-      // Local execution fallback if backend is offline
-      setTimeout(() => {
-        const text = candidate.toLowerCase();
-        const fallback = text.includes("customer")
-          ? DEMO_QUERY_RESULTS["customers"]
-          : text.includes("region")
-            ? DEMO_QUERY_RESULTS["orders"]
-            : {
-                ...DEMO_QUERY_RESULTS["default"],
-                sql: candidate,
-                id: "req_demo_" + Math.floor(Math.random() * 900 + 100),
-              };
-        setResult(fallback);
-        setTab("Results");
-        setHistory((old) => [{ title, sql: candidate }, ...old].slice(0, 12));
-        setBusy(false);
-      }, 200);
-      return;
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Could not run the query.");
     } finally {
       setBusy(false);
     }
   }
 
   async function ask() {
-    if (busy) return;
+    if (busy || !meta || (custom && !customQuestion.trim())) return;
     setBusy(true);
     setError("");
+    setResult(undefined);
     let candidate = "";
     try {
       const data = await api<{ sql: string }>(
@@ -204,19 +99,8 @@ export function QueryWorkbench({ back }: { back: () => void }) {
       );
       candidate = data.sql;
       setSql(candidate);
-    } catch {
-      // Fallback SQL query generation
-      if (question.includes("customer") || customQuestion.includes("customer")) {
-        candidate =
-          "SELECT c.name AS customer, c.country, ROUND(SUM(o.amount), 2) AS total_spend\nFROM customers c\nJOIN orders o ON c.id = o.customer_id\nGROUP BY c.id\nORDER BY total_spend DESC\nLIMIT 5";
-      } else if (question.includes("APAC") || question.includes("Orders")) {
-        candidate =
-          "SELECT region, status, COUNT(*) AS order_count, ROUND(SUM(amount), 2) AS total_amount\nFROM orders\nWHERE region = 'APAC'\nGROUP BY region, status";
-      } else {
-        candidate =
-          "SELECT product, ROUND(SUM(amount), 2) AS revenue\nFROM orders\nWHERE status = 'paid'\nGROUP BY product\nORDER BY revenue DESC";
-      }
-      setSql(candidate);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Could not generate SQL.");
     } finally {
       setBusy(false);
     }

@@ -1,9 +1,9 @@
-const ENGINE: string = import.meta.env["VITE_ENGINE_URL"] || "/api";
 import { useEffect, useRef, useState } from "react";
 import { db, remoteSource, rows, type Source } from "./client";
 import { AnimalMorphLoader } from "./Motion";
 import { saveQuery } from "./Library";
 import { createLatest } from "./latest";
+import { ENGINE_BASE, SESSION_EXPIRED } from "./engineBase";
 
 export type Result = {
   columns: string[];
@@ -32,8 +32,6 @@ function sqlIdentifier(name: string, dialect: string) {
   return quote + name.replaceAll(quote, quote + quote) + quote;
 }
 
-export const SESSION_EXPIRED = "morphy:session-expired";
-
 export async function engine<T>(
   database: string,
   path: string,
@@ -41,15 +39,15 @@ export async function engine<T>(
   method = "POST",
   fullPath?: string,
 ): Promise<T> {
-  const { data } = await db!.auth.getSession();
-  if (!data.session) {
+  const { data } = (await db?.auth.getSession()) ?? {};
+  if (!data?.session) {
     window.dispatchEvent(new Event(SESSION_EXPIRED));
     throw Error("Your session expired. Sign in again.");
   }
   let response: Response;
   try {
     response = await fetch(
-      ENGINE + (fullPath || "/engine/databases/" + database + "/" + path),
+      ENGINE_BASE + (fullPath || "/engine/databases/" + database + "/" + path),
       {
         method: body || fullPath ? method : "GET",
         headers: {

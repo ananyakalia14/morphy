@@ -3905,9 +3905,31 @@ button.link {
 }
 
 /* Modals for CLI */
-.cli-detail-modal {
-  max-width: 580px !important;
+.cli-walkthrough {
+  position: fixed;
+  inset: 0;
+  width: min(39rem, calc(100% - 2rem));
+  max-width: none;
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: clamp(1rem, 4vw, 1.75rem);
+  overflow: auto;
+  border: 2px solid #000;
+  border-radius: 0;
+  box-shadow: 6px 6px 0 #0047ff;
 }
+.cli-walkthrough::backdrop { background: #080a0eb8; }
+.cli-walkthrough-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem; margin-bottom: .75rem; }
+.cli-walkthrough-steps button { min-height: 2.65rem; padding: .25rem; border: 1px solid #000; background: white; color: #000; font: 500 clamp(.6rem, 2vw, .78rem)/1.3 var(--mono); }
+.cli-walkthrough-steps button[aria-pressed="true"] { background: #0047ff; color: white; }
+.cli-walkthrough-console { margin-bottom: .8rem; padding: .85rem; background: #0f172a; color: #e1eaff; }
+.cli-walkthrough-console pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 500 .8rem/1.5 var(--mono); }
+.cli-walkthrough-console code { color: #9bb8ff; }
+.cli-walkthrough-actions { flex-wrap: wrap; justify-content: space-between; }
+.cli-walkthrough-actions button { display: inline-flex; align-items: center; gap: .4rem; }
+.cli-walkthrough-status { min-height: 1.2em; margin: .45rem 0 0; font: 500 .72rem var(--mono); }
+.cli-term-text { overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .cli-walkthrough { animation: none; } }
 
 .cli-modal-lead {
   font-family: var(--mono, monospace);

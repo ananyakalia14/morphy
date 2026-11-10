@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://morphy-engine-ananya27.vercel.app/api/:path*"
+      "destination": "https://morphy-engine.vercel.app/api/:path*"
     }
   ]
 }

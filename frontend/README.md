@@ -6,9 +6,13 @@ Run npm ci, npm run dev and npm run build from this directory. Copy .env.example
 
 ## Existing features
 
-Landing page, six-animal intro/hero, reduced motion, account forms, username claim, optional avatar conversion/upload, organizations, invitations, membership roles, access-policy editor, live query UI, CSV import, activity view and a synthetic query workspace.
+Landing page with the database convergence backdrop, six-animal intro, reduced motion, password sign-in and signup, username claim, optional avatar conversion/upload, organizations, invitations, membership roles, access-policy editor, live query UI, CSV import, activity view and a synthetic query workspace. Workspace and dashboard links require a Supabase session and retain their destination through password sign-in.
 
 LiveEngine.tsx uses authenticated engine endpoints from ../docs/API.md. QueryWorkbench.tsx exposes the labeled synthetic dataset and local-model questions. These flows have different authorization requirements.
+
+Both use the same-origin `/api` base. Vite forwards it to `http://127.0.0.1:8000` in development, and Vercel forwards it to `https://morphy-engine.vercel.app` in production. Keep `VITE_ENGINE_URL` empty for those defaults. An override must include `/api`.
+
+The CLI walkthrough uses the public synthetic sample. The PostgreSQL, MySQL and MariaDB marks are sourced from [Simple Icons 15.22.0](https://github.com/simple-icons/simple-icons/tree/15.22.0/icons).
 
 The live dataset overview uses permitted schema metadata to suggest a row count and a bounded preview per table. Selecting a suggestion fills the SQL editor. Execution still requires the user's action and the engine's current permission checks.
 

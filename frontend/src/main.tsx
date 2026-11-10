@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useState,
-  type FormEvent,
   type ReactNode,
   useRef,
   lazy,
@@ -23,9 +22,10 @@ import {
   type Org,
   type Invite,
 } from "./client";
-import { AnimalMorphLoader, Intro } from "./Motion";
+import { AnimalMorphLoader, Intro, useReducedMotion } from "./Motion";
 import { Landing } from "./Landing";
-import { SESSION_EXPIRED } from "./LiveEngine";
+import { SESSION_EXPIRED } from "./engineBase";
+import { useConstrainedConnection } from "./connection";
 import { SiteFooter } from "./SiteFooter";
 
 // Lazy-load heavier routes for instant initial landing load
@@ -121,140 +121,6 @@ function Notice({ error }: { error: string }) {
       {error}
     </p>
   ) : null;
-}
-function Auth({ initial, back }: { initial: string; back: () => void }) {
-  const [mode, setMode] = useState(initial),
-    [name, setName] = useState(""),
-    [email, setEmail] = useState(""),
-    [password, setPass] = useState(""),
-    [notice, setNotice] = useState("");
-  const { busy, error, run } = useAction();
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    void run(async () => {
-      setNotice("");
-      if (!db)
-        throw Error(
-          "Start local Supabase with start-local.ps1 to enable accounts.",
-        );
-      const res =
-        mode === "signup"
-          ? await db.auth.signUp({
-              email,
-              password,
-              options: {
-                data: { full_name: name },
-                emailRedirectTo: location.origin,
-              },
-            })
-          : await db.auth.signInWithPassword({ email, password });
-      if (res.error) {
-        if (res.error.code === "over_email_send_rate_limit" || /email rate limit exceeded/i.test(res.error.message)) {
-          throw Error("We couldn’t send the confirmation email because the email limit was reached. Wait before trying again.");
-        }
-        if (res.error.code === "email_address_not_authorized") {
-          throw Error("Signup emails are unavailable for this address. A MORPHY administrator needs to finish configuring email delivery.");
-        }
-        throw res.error;
-      }
-      if (!res.data.session)
-        setNotice("Check your email to finish signing in.");
-    });
-  }
-  return (
-    <Shell back={back}>
-      <div className="auth-grid">
-        <aside className="auth-art">
-          <img src="/motion/signupleftimage.jpg" alt="MORPHY" />
-          <span>FIG. 03 / SIGN UP</span>
-        </aside>
-        <section className="panel">
-          <div className="eyebrow">ACCOUNT</div>
-          <h2>
-            {mode === "signup" ? "Create your account." : "Welcome back."}
-          </h2>
-          <form onSubmit={submit}>
-            {mode === "signup" && (
-              <label>
-                Your name
-                <input
-                  required
-                  maxLength={80}
-                  autoComplete="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </label>
-            )}
-            <label>
-              Email
-              <input
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </label>
-            <label>
-              Password
-              <input
-                type="password"
-                required
-                minLength={mode === "signup" ? 8 : 1}
-                autoComplete={
-                  mode === "signup" ? "new-password" : "current-password"
-                }
-                value={password}
-                onChange={(e) => setPass(e.target.value)}
-              />
-            </label>
-            <button className="primary" disabled={busy}>
-              {mode === "signup" ? "Create account" : "Sign in"} ↗
-            </button>
-          </form>
-          {["github", "google"]
-            .filter((p) =>
-              (import.meta.env["VITE_OAUTH_PROVIDERS"] || "")
-                .split(",")
-                .includes(p),
-            )
-            .map((p) => (
-              <button
-                key={p}
-                onClick={() =>
-                  void run(async () => {
-                    if (!db) throw Error("Start local Supabase first.");
-                    const { error } = await db.auth.signInWithOAuth({
-                      provider: p as "github" | "google",
-                      options: { redirectTo: location.origin },
-                    });
-                    if (error) throw error;
-                  })
-                }
-              >
-                Continue with {p === "github" ? "GitHub" : "Google"}
-              </button>
-            ))}
-          {busy && <AnimalMorphLoader label="Signing in" />}
-          <Notice error={error} />
-          {!error && notice && <p role="status">{notice}</p>}
-          <button
-            className="link"
-            disabled={busy}
-            onClick={() => {
-              setMode(mode === "signup" ? "signin" : "signup");
-              setNotice("");
-            }}
-          >
-            {mode === "signup"
-              ? "Already registered? Sign in"
-              : "New here? Create an account"}
-          </button>
-        </section>
-      </div>
-    </Shell>
-  );
 }
 function Identity({
   session,
@@ -378,22 +244,6 @@ function Account({
   const { busy, error, run } = useAction();
   const reload = useCallback(async () => {
     setLoadError("");
-    if (!db) {
-      setData({
-        profile: {
-          id: session.user.id,
-          username: "ananya",
-          display_name: "Ananya Kalia",
-          avatar_path: null,
-        },
-        orgs: [
-          { id: "org-demo", name: "Morphy Analytics Lab", owner_id: session.user.id },
-        ],
-        invites: [],
-      });
-      setOrg("org-demo");
-      return;
-    }
     const [profiles, orgs, invites] = await Promise.all([
       rows<Profile>("profiles", { id: session.user.id }),
       rows<Org>("organizations"),
@@ -517,21 +367,6 @@ function Account({
     </Shell>
   );
 }
-const DEMO_SESSION: Session = {
-  access_token: "demo-token",
-  token_type: "bearer",
-  expires_in: 3600,
-  refresh_token: "demo-refresh",
-  user: {
-    id: "user-demo",
-    app_metadata: {},
-    user_metadata: { full_name: "Ananya Kalia" },
-    aud: "authenticated",
-    created_at: new Date().toISOString(),
-    email: "ananya@morphy.local",
-  },
-};
-
 const isWorkspaceHash = (h: string) =>
   [
     "#workspace",
@@ -540,6 +375,7 @@ const isWorkspaceHash = (h: string) =>
     "#sources",
     "#team",
     "#queries",
+    "#query",
     "#activity",
     "#cli",
     "#orgs",
@@ -554,6 +390,8 @@ const resolvePage = (hash: string) => {
 };
 
 export function App() {
+  const reducedMotion = useReducedMotion();
+  const constrained = useConstrainedConnection();
   const [session, setSession] = useState<Session | null>(null),
     [ready, setReady] = useState(!db),
     [page, setPage] = useState(() => resolvePage(location.hash));
@@ -561,42 +399,27 @@ export function App() {
     () =>
       location.hash === "" &&
       sessionStorage.getItem("morphy-intro-dismissed") !== "1" &&
-      !matchMedia("(prefers-reduced-motion: reduce)").matches,
+      !reducedMotion && !constrained && !matchMedia("(max-width: 780px)").matches,
   );
-  const [morph, setMorph] = useState(() => {
-    // Show loader on refresh / initial load if not showing intro video on landing
-    const isIntroOnLanding =
-      location.hash === "" &&
-      sessionStorage.getItem("morphy-intro-dismissed") !== "1" &&
-      !matchMedia("(prefers-reduced-motion: reduce)").matches;
-    return !isIntroOnLanding;
-  });
+  const showIntro = page === "landing" && intro && !reducedMotion && !constrained;
   const [expiredNote, setExpiredNote] = useState(false);
   useEffect(() => {
     if (session) sessionStorage.removeItem("morphy-expired");
     setExpiredNote(!session && sessionStorage.getItem("morphy-expired") === "1");
   }, [session, page]);
-  useEffect(() => {
-    if (morph) {
-      const t = setTimeout(() => setMorph(false), 1100);
-      return () => clearTimeout(t);
-    }
-  }, []);
+  useEffect(() => { if (reducedMotion || constrained) setIntro(false); }, [reducedMotion, constrained]);
   const first = useRef(true);
   useEffect(() => {
     if (first.current) {
       first.current = false;
       return;
     }
-    window.scrollTo(0, 0);
-    setMorph(true);
-    const t = setTimeout(() => setMorph(false), 1100);
-    return () => clearTimeout(t);
+    window.scrollTo({ top: 0, behavior: "instant" });
   }, [page, session?.user.id]);
-  const close = useCallback(() => {
+  const close = useCallback((focusHero = true) => {
     sessionStorage.setItem("morphy-intro-dismissed", "1");
     setIntro(false);
-    requestAnimationFrame(() =>
+    if (focusHero) requestAnimationFrame(() =>
       document
         .querySelector<HTMLButtonElement>(".hero-copy .primary")
         ?.focus({ preventScroll: true }),
@@ -612,8 +435,10 @@ export function App() {
     const expired = () => {
       sessionStorage.setItem("morphy-expired", "1");
       void db?.auth.signOut({ scope: "local" }).then(() => {
-        location.hash = "signin";
-        setPage("signin");
+        if (!isWorkspaceHash(location.hash)) {
+          location.hash = "signin";
+          setPage("signin");
+        }
       });
     };
     window.addEventListener(SESSION_EXPIRED, expired);
@@ -627,18 +452,10 @@ export function App() {
     location.hash = where === "landing" ? "" : where;
     setPage(where);
   }
-  const overlay =
-    page === "landing" && intro ? (
-      <Intro close={close} />
-    ) : morph ? (
-      <div className="page-morph" aria-hidden="true">
-        <AnimalMorphLoader label="Loading Morphy" />
-      </div>
-    ) : null;
   return (
     <>
-      {overlay}
-      <div inert={page === "landing" && intro ? true : morph ? true : undefined}>
+      {showIntro && <Intro close={close} />}
+      <div inert={showIntro}>
         <Suspense fallback={<AnimalMorphLoader />}>
           {view()}
         </Suspense>
@@ -647,12 +464,11 @@ export function App() {
   );
   function view() {
     if (page === "explore") return <QueryWorkbench back={() => go("landing")} />;
-    if (page === "workspace" || session) {
-      const activeSession = session || DEMO_SESSION;
+    if (session) {
       return (
         <Account
-          key={activeSession.user.id}
-          session={activeSession}
+          key={session.user.id}
+          session={session}
           signout={() => {
             void db?.auth.signOut({ scope: "local" }).then(() => go("landing"));
             go("landing");
@@ -665,6 +481,7 @@ export function App() {
       return (
         <LoginPage
           initialMode={page === "signup" ? "signup" : "signin"}
+          workspaceDestination={page === "workspace" ? location.hash : undefined}
           back={() => go("landing")}
           expiredMessage={
             expiredNote
@@ -673,7 +490,7 @@ export function App() {
           }
         />
       );
-    return <Landing start={() => go("signup")} signin={() => go("signin")} />;
+    return <Landing start={() => go("signup")} signin={() => go("signin")} deferVideo={showIntro || constrained} />;
   }
 }
 
