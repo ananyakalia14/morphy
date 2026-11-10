@@ -1,58 +1,40 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useEffect } from "react";
 
-const video = "/motion/morphy_databases_v2_loop.mp4";
-const videoSmall = "/motion/morphy_databases_v2_loop_540.mp4";
-const poster = "/motion/morphy_databases_v2_poster.jpg";
-const compactViewport = "(max-width: 780px)";
+export const HERO_VIDEO = {
+  src: "/motion/Rightsidehomepage.mp4",
+  altSrc: "/motion/rightsideintro.mp4",
+};
 
 export function HeroBackdrop({ reduced }: { reduced: boolean }) {
-  const ref = useRef<HTMLVideoElement>(null),
-    [paused, setPaused] = useState(false),
-    [failed, setFailed] = useState(false),
-    [compact, setCompact] = useState(() => matchMedia(compactViewport).matches);
+  const ref = useRef<HTMLVideoElement>(null);
+
   useEffect(() => {
-    const media = matchMedia(compactViewport);
-    const resize = () => setCompact(media.matches);
-    media.addEventListener("change", resize);
-    return () => media.removeEventListener("change", resize);
-  }, []);
-  const animated = !reduced && !failed;
+    if (ref.current && !reduced) {
+      // Delay play slightly so critical layout paint finishes first
+      const t = setTimeout(() => {
+        ref.current?.play().catch(() => {});
+      }, 50);
+      return () => clearTimeout(t);
+    }
+  }, [reduced]);
+
   return (
-    <>
     <div className="hero-backdrop par-bg" aria-hidden="true">
-      {animated ? (
+      {!reduced && (
         <video
           ref={ref}
-          src={compact ? videoSmall : video}
-          autoPlay={!paused}
+          autoPlay
           muted
           loop
           playsInline
-          poster={poster}
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <img src={poster} alt="" />
+          preload="metadata"
+        >
+          <source src="/motion/Rightsidehomepage.mp4" type="video/mp4" />
+          <source src="/motion/rightsideintro.mp4" type="video/mp4" />
+        </video>
       )}
       <div className="hero-grid" />
       <div className="hero-veil" />
     </div>
-    {animated && (
-      <button
-        type="button"
-        className="video-toggle"
-        aria-pressed={paused}
-        onClick={() => {
-          const v = ref.current;
-          if (!v) return;
-          if (paused) void v.play().catch(() => setPaused(true));
-          else v.pause();
-          setPaused(!paused);
-        }}
-      >
-        {paused ? "▶ Play background" : "❚❚ Pause background"}
-      </button>
-    )}
-    </>
   );
 }

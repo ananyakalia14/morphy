@@ -1,6 +1,5 @@
 import { createRoot } from "react-dom/client";
 import "./style.css";
-import { QueryWorkbench } from './QueryWorkbench';
 import {
   useCallback,
   useEffect,
@@ -8,11 +7,13 @@ import {
   type FormEvent,
   type ReactNode,
   useRef,
+  lazy,
+  Suspense,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
-import "@fontsource/syne/700.css";
-import "@fontsource/syne/800.css";
-import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/syne/latin-700.css";
+import "@fontsource/syne/latin-800.css";
+import "@fontsource/jetbrains-mono/latin-500.css";
 import {
   db,
   rpc,
@@ -24,8 +25,19 @@ import {
 } from "./client";
 import { AnimalMorphLoader, Intro } from "./Motion";
 import { Landing } from "./Landing";
-import { Workspace } from "./Workspace";
 import { SESSION_EXPIRED } from "./LiveEngine";
+import { SiteFooter } from "./SiteFooter";
+
+// Lazy-load heavier routes for instant initial landing load
+const QueryWorkbench = lazy(() =>
+  import("./QueryWorkbench").then((m) => ({ default: m.QueryWorkbench })),
+);
+const Workspace = lazy(() =>
+  import("./Workspace").then((m) => ({ default: m.Workspace })),
+);
+const LoginPage = lazy(() =>
+  import("./LoginPage").then((m) => ({ default: m.LoginPage })),
+);
 
 function ProfileEditor({ profile, done }: { profile: Profile; done: () => Promise<void> }) {
   const [name, setName] = useState(profile.display_name),
@@ -78,10 +90,14 @@ function Shell({
   children,
   back,
   signout,
+  noFooter,
+  fullWidth,
 }: {
   children: ReactNode;
   back?: () => void;
   signout?: () => void;
+  noFooter?: boolean;
+  fullWidth?: boolean;
 }) {
   return (
     <>
@@ -94,7 +110,8 @@ function Shell({
         </button>
         <nav>{signout && <button onClick={signout}>Sign out ↗</button>}</nav>
       </header>
-      <main className="shell">{children}</main>
+      <main className={fullWidth ? "shell shell-full" : "shell"}>{children}</main>
+      {!noFooter && <SiteFooter />}
     </>
   );
 }
@@ -148,8 +165,8 @@ function Auth({ initial, back }: { initial: string; back: () => void }) {
     <Shell back={back}>
       <div className="auth-grid">
         <aside className="auth-art">
-          <img src="/motion/crocodile.svg" alt="MORPHY crocodile" />
-          <span>FIG. 03 / CROCODILE</span>
+          <img src="/motion/signupleftimage.jpg" alt="MORPHY" />
+          <span>FIG. 03 / SIGN UP</span>
         </aside>
         <section className="panel">
           <div className="eyebrow">ACCOUNT</div>
@@ -361,6 +378,22 @@ function Account({
   const { busy, error, run } = useAction();
   const reload = useCallback(async () => {
     setLoadError("");
+    if (!db) {
+      setData({
+        profile: {
+          id: session.user.id,
+          username: "ananya",
+          display_name: "Ananya Kalia",
+          avatar_path: null,
+        },
+        orgs: [
+          { id: "org-demo", name: "Morphy Analytics Lab", owner_id: session.user.id },
+        ],
+        invites: [],
+      });
+      setOrg("org-demo");
+      return;
+    }
     const [profiles, orgs, invites] = await Promise.all([
       rows<Profile>("profiles", { id: session.user.id }),
       rows<Org>("organizations"),
@@ -377,7 +410,7 @@ function Account({
   }, [reload]);
   const active = data?.orgs.find((o) => o.id === org);
   return (
-    <Shell signout={signout}>
+    <Shell signout={signout} noFooter={true} fullWidth={true}>
       {loadError ? (
         <>
           <Notice error={loadError} />
@@ -395,10 +428,6 @@ function Account({
         <>
           <div className="account-bar">
             <strong>@{data.profile.username}</strong>
-            <ProfileEditor profile={data.profile} done={reload} />
-            <button disabled={busy} onClick={() => void run(reload)}>
-              Refresh invitations
-            </button>
             {data.orgs.length > 0 && (
               <>
                 <label>
@@ -478,6 +507,7 @@ function Account({
               key={active.id}
               org={active}
               me={session.user.id}
+              profile={data.profile}
               reloadAccount={reload}
             />
           )}
@@ -487,29 +517,80 @@ function Account({
     </Shell>
   );
 }
+const DEMO_SESSION: Session = {
+  access_token: "demo-token",
+  token_type: "bearer",
+  expires_in: 3600,
+  refresh_token: "demo-refresh",
+  user: {
+    id: "user-demo",
+    app_metadata: {},
+    user_metadata: { full_name: "Ananya Kalia" },
+    aud: "authenticated",
+    created_at: new Date().toISOString(),
+    email: "ananya@morphy.local",
+  },
+};
+
+const isWorkspaceHash = (h: string) =>
+  [
+    "#workspace",
+    "#dashboards",
+    "#governance",
+    "#sources",
+    "#team",
+    "#queries",
+    "#activity",
+    "#cli",
+    "#orgs",
+  ].includes(h);
+
+const resolvePage = (hash: string) => {
+  if (hash === "#signup") return "signup";
+  if (hash === "#signin") return "signin";
+  if (hash === "#explore") return "explore";
+  if (isWorkspaceHash(hash)) return "workspace";
+  return "landing";
+};
+
 export function App() {
   const [session, setSession] = useState<Session | null>(null),
     [ready, setReady] = useState(!db),
-    [page, setPage] = useState(
-      location.hash === "#signin"
-        ? "signin"
-        : location.hash === "#signup"
-          ? "signup"
-          : location.hash === "#explore" ? "explore" : "landing",
-    );
-  const [intro, setIntro] = useState(() => sessionStorage.getItem("morphy-intro-dismissed") !== "1" && !matchMedia("(prefers-reduced-motion: reduce)").matches);
+    [page, setPage] = useState(() => resolvePage(location.hash));
+  const [intro, setIntro] = useState(
+    () =>
+      location.hash === "" &&
+      sessionStorage.getItem("morphy-intro-dismissed") !== "1" &&
+      !matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  const [morph, setMorph] = useState(() => {
+    // Show loader on refresh / initial load if not showing intro video on landing
+    const isIntroOnLanding =
+      location.hash === "" &&
+      sessionStorage.getItem("morphy-intro-dismissed") !== "1" &&
+      !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return !isIntroOnLanding;
+  });
   const [expiredNote, setExpiredNote] = useState(false);
   useEffect(() => {
     if (session) sessionStorage.removeItem("morphy-expired");
     setExpiredNote(!session && sessionStorage.getItem("morphy-expired") === "1");
   }, [session, page]);
-  const [morph, setMorph] = useState(false);
+  useEffect(() => {
+    if (morph) {
+      const t = setTimeout(() => setMorph(false), 1100);
+      return () => clearTimeout(t);
+    }
+  }, []);
   const first = useRef(true);
   useEffect(() => {
-    if (first.current) { first.current = false; return; }
-    setMorph(true);
+    if (first.current) {
+      first.current = false;
+      return;
+    }
     window.scrollTo(0, 0);
-    const t = setTimeout(() => setMorph(false), 1400);
+    setMorph(true);
+    const t = setTimeout(() => setMorph(false), 1100);
     return () => clearTimeout(t);
   }, [page, session?.user.id]);
   const close = useCallback(() => {
@@ -526,14 +607,7 @@ export function App() {
       setSession(next);
       setReady(true);
     });
-    const nav = () =>
-      setPage(
-        location.hash === "#signup"
-          ? "signup"
-          : location.hash === "#signin"
-            ? "signin"
-            : location.hash === "#explore" ? "explore" : "landing",
-      );
+    const nav = () => setPage(resolvePage(location.hash));
     window.addEventListener("hashchange", nav);
     const expired = () => {
       sessionStorage.setItem("morphy-expired", "1");
@@ -553,35 +627,53 @@ export function App() {
     location.hash = where === "landing" ? "" : where;
     setPage(where);
   }
-  const overlay = intro ? <Intro close={close} /> : morph ? (
-    <div className="page-morph" aria-hidden="true"><AnimalMorphLoader label="Morphing" /></div>
-  ) : null;
-  return <>{overlay}<div inert={intro || morph}>{view()}</div></>;
+  const overlay =
+    page === "landing" && intro ? (
+      <Intro close={close} />
+    ) : morph ? (
+      <div className="page-morph" aria-hidden="true">
+        <AnimalMorphLoader label="Loading Morphy" />
+      </div>
+    ) : null;
+  return (
+    <>
+      {overlay}
+      <div inert={page === "landing" && intro ? true : morph ? true : undefined}>
+        <Suspense fallback={<AnimalMorphLoader />}>
+          {view()}
+        </Suspense>
+      </div>
+    </>
+  );
   function view() {
-  if (page === "explore") return <QueryWorkbench back={() => go("landing")} />;
-  if (!ready) return <AnimalMorphLoader />;
-  if (session)
-    return (
-      <Account
-        key={session.user.id}
-        session={session}
-        signout={() => {
-          void db?.auth.signOut({ scope: "local" }).then(() => go("landing"));
-        }}
-      />
-    );
-  if (page !== "landing")
-    return (
-      <>
-        {expiredNote && (
-          <p role="alert" className="expired-note">
-            Your session expired. Sign in again to continue.
-          </p>
-        )}
-        <Auth initial={page} back={() => go("landing")} />
-      </>
-    );
-  return <Landing start={() => go("signup")} signin={() => go("signin")} />;
+    if (page === "explore") return <QueryWorkbench back={() => go("landing")} />;
+    if (page === "workspace" || session) {
+      const activeSession = session || DEMO_SESSION;
+      return (
+        <Account
+          key={activeSession.user.id}
+          session={activeSession}
+          signout={() => {
+            void db?.auth.signOut({ scope: "local" }).then(() => go("landing"));
+            go("landing");
+          }}
+        />
+      );
+    }
+    if (!ready) return <AnimalMorphLoader />;
+    if (page !== "landing")
+      return (
+        <LoginPage
+          initialMode={page === "signup" ? "signup" : "signin"}
+          back={() => go("landing")}
+          expiredMessage={
+            expiredNote
+              ? "Your session expired. Sign in again to continue."
+              : undefined
+          }
+        />
+      );
+    return <Landing start={() => go("signup")} signin={() => go("signin")} />;
   }
 }
 

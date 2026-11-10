@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 const names = [
   "Bull",
   "Duck",
@@ -26,12 +26,22 @@ export function AnimalMorphLoader({
   label?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = 1.0;
+      videoRef.current.play().catch(() => {});
+    }
+  }, []);
+
   return (
     <div className="wait" role="status">
       {failed ? (
         <img src="/motion/bull.svg" alt="" />
       ) : (
         <video
+          ref={videoRef}
           autoPlay
           loop
           muted
@@ -52,45 +62,70 @@ export function AnimalMorphLoader({
   );
 }
 export function Intro({ close }: { close: () => void }) {
-  const ref = useRef<HTMLButtonElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [exiting, setExiting] = useState(false);
+  const exitingRef = useRef(false);
+
+  const finish = useCallback(() => {
+    if (exitingRef.current) return;
+    exitingRef.current = true;
+    setExiting(true);
+    setTimeout(() => {
+      close();
+    }, 450);
+  }, [close]);
+
+  const applyRate = useCallback(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = 1.2;
+    }
+  }, []);
+
   useEffect(() => {
-    ref.current?.focus();
+    applyRate();
+    if (videoRef.current) {
+      videoRef.current.play().catch(() => {});
+    }
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-      if (e.key === "Tab") {
-        e.preventDefault();
-        ref.current?.focus();
+      if (e.key === "Escape" || e.key === "Enter" || e.key === " ") {
+        finish();
       }
     };
     window.addEventListener("keydown", onKey);
-    const timer = setTimeout(close, 8500);
+
+    // Intro master length is 8s; at 1.2x it finishes in ~6.67s.
+    // Fallback safety timer transitions to landing if events are missed:
+    const timer = setTimeout(finish, 7500);
+
     return () => {
       clearTimeout(timer);
       window.removeEventListener("keydown", onKey);
     };
-  }, [close]);
+  }, [applyRate, finish]);
+
   return (
     <div
-      className="curtain"
+      className={`curtain ${exiting ? "is-exiting" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label="MORPHY animated introduction"
+      onClick={finish}
     >
-      <strong className="brand">MORPHY</strong>
       <video
+        ref={videoRef}
+        src="/motion/NEWINTRO.mp4"
         autoPlay
         muted
         playsInline
-        onEnded={close}
-        onError={close}
-        poster="/motion/bull.svg"
+        preload="auto"
+        onLoadedMetadata={applyRate}
+        onPlay={applyRate}
+        onEnded={finish}
+        onError={finish}
       >
-        <source src="/motion/intro.mp4" type="video/mp4" />
-        <source src="/motion/intro.webm" type="video/webm" onError={close} />
+        <source src="/motion/NEWINTRO.mp4" type="video/mp4" />
       </video>
-      <button ref={ref} onClick={close}>
-        Skip intro ↗
-      </button>
     </div>
   );
 }

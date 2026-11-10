@@ -37,10 +37,39 @@ export function useSavedQueries(org: string) {
   const [latest] = useState(createLatest);
   const reload = useCallback(async () => {
     const isLatest = latest.next();
+    if (!db) {
+      if (!isLatest()) return;
+      setList([
+        {
+          id: "sq-1",
+          org_id: org,
+          database_id: "db-1",
+          author_id: "user-demo",
+          title: "Monthly Revenue Aggregation",
+          sql_text: "SELECT date_trunc('month', created_at) AS month, round(sum(amount), 2) AS revenue\nFROM orders\nWHERE status = 'completed'\nGROUP BY 1\nORDER BY 1 DESC",
+          shared: true,
+          revision: 1,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: "sq-2",
+          org_id: org,
+          database_id: "db-2",
+          author_id: "user-demo",
+          title: "Active Users By Geographic Region",
+          sql_text: "SELECT country, count(distinct user_id) as active_count\nFROM telemetry_sessions\nGROUP BY country\nORDER BY active_count DESC",
+          shared: true,
+          revision: 1,
+          updated_at: new Date(Date.now() - 7200000).toISOString(),
+        },
+      ]);
+      setError("");
+      return;
+    }
     try {
       const data =
         await q<SavedQuery[]>(
-          db!
+          db
             .from("saved_queries")
             .select("*")
             .eq("org_id", org)
@@ -273,9 +302,26 @@ export function Dashboards({ org, me, sources }: { org: string; me: string; sour
     [panelsLatest] = useState(createLatest);
   const reload = useCallback(async () => {
     const isLatest = boardsLatest.next();
+    if (!db) {
+      if (!isLatest()) return;
+      setBoards([
+        {
+          id: "dash-1",
+          org_id: org,
+          database_id: sources[0]?.id || "db-1",
+          author_id: me,
+          title: "Executive Revenue & Churn Overview",
+          shared: true,
+          revision: 1,
+          updated_at: new Date().toISOString(),
+        },
+      ]);
+      setLoadError("");
+      return;
+    }
     try {
       const b = await q<Dashboard[]>(
-        db!.from("dashboards").select("*").eq("org_id", org).order("updated_at", { ascending: false }),
+        db.from("dashboards").select("*").eq("org_id", org).order("updated_at", { ascending: false }),
       );
       if (!isLatest()) return;
       setBoards(b);
@@ -287,9 +333,13 @@ export function Dashboards({ org, me, sources }: { org: string; me: string; sour
   const loadPanels = useCallback(
     async (id: string) => {
       const isLatest = panelsLatest.next();
+      if (!db) {
+        if (isLatest()) setPanels([]);
+        return;
+      }
       const p = id
         ? await q<Panel[]>(
-            db!.from("dashboard_panels").select("*").eq("dashboard_id", id).order("position").order("query_id"),
+            db.from("dashboard_panels").select("*").eq("dashboard_id", id).order("position").order("query_id"),
           )
         : [];
       if (isLatest()) setPanels(p);

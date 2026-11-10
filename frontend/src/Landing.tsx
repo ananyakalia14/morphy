@@ -1,14 +1,15 @@
 import { useEffect, useRef, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { useReducedMotion } from "./Motion";
 import { HeroBackdrop } from "./HeroBackdrop";
+import { SiteFooter } from "./SiteFooter";
+import { DatabaseContributionGrid } from "./DatabaseMatrix";
+import { CliPromoSection } from "./CliPromoSection";
 
 const FEATURES = [
   ["@", "Claim your handle", "One global username for your profile and workspace invitations."],
   ["↗", "Bring people in", "Create an organization and invite teammates by their handles."],
   ["⌗", "Define access", "Choose who can view, query, or edit each database configuration."],
 ] as const;
-
-const TICKER = ["GLOBAL IDENTITY", "ORGANIZATIONS", "GRANULAR ACCESS", "GOVERNED SQL", "READ-ONLY BY DESIGN"];
 
 function Reveal({ children, delay = 0, className = "" }: { children: ReactNode; delay?: number; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -53,7 +54,13 @@ function Cursor() {
     const move = (e: PointerEvent) => {
       el.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
       const t = e.target as Element | null;
-      el.classList.toggle("snap", !!t?.closest("a,button"));
+      const inModal = !!t?.closest(".workspace-modal-overlay, [role='dialog'], dialog, input, textarea, select");
+      if (inModal) {
+        el.style.opacity = "0";
+      } else {
+        el.style.opacity = "1";
+        el.classList.toggle("snap", !!t?.closest("a,button"));
+      }
     };
     window.addEventListener("pointermove", move);
     return () => {
@@ -134,20 +141,15 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
             </div>
           </div>
         </section>
-        <div className="strip ticker" aria-label="Workspace features">
-          <div className="ticker-track">
-            {[0, 1].map((k) => (
-              <div key={k} className="ticker-set" aria-hidden={k === 1}>
-                {TICKER.map((t) => (
-                  <span key={t} className="ticker-item">
-                    <span>✳</span> {t}
-                  </span>
-                ))}
-              </div>
-            ))}
-          </div>
+        <div id="sources">
+          <DatabaseContributionGrid />
         </div>
-        <section id="workspace" className="overview">
+        <section className="landing-cli-section">
+          <div className="landing-cli-container">
+            <CliPromoSection />
+          </div>
+        </section>
+        <section id="philosophy" className="overview">
           <Reveal className="section-title">
             <div className="eyebrow">THE WORKSPACE</div>
             <h2>Built around your team.</h2>
@@ -165,10 +167,7 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
           </div>
         </section>
       </main>
-      <footer>
-        <strong>MORPHY</strong>
-        <span>POLYGLOT DATA WORKSPACE</span>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
