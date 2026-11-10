@@ -25,23 +25,16 @@ export function AnimalMorphLoader({
 }: {
   label?: string;
 }) {
+  const reduced = useReducedMotion();
   const [failed, setFailed] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.playbackRate = 1.0;
-      videoRef.current.play().catch(() => {});
-    }
-  }, []);
 
   return (
     <div className="wait" role="status">
-      {failed ? (
+      {failed || reduced ? (
         <img src="/motion/bull.svg" alt="" />
       ) : (
         <video
-          ref={videoRef}
+          aria-hidden="true"
           autoPlay
           loop
           muted
@@ -65,14 +58,13 @@ export function Intro({ close }: { close: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [exiting, setExiting] = useState(false);
   const exitingRef = useRef(false);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const finish = useCallback(() => {
     if (exitingRef.current) return;
     exitingRef.current = true;
     setExiting(true);
-    setTimeout(() => {
-      close();
-    }, 450);
+    exitTimer.current = setTimeout(close, 450);
   }, [close]);
 
   const applyRate = useCallback(() => {
@@ -88,7 +80,7 @@ export function Intro({ close }: { close: () => void }) {
     }
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "Enter" || e.key === " ") {
+      if (e.key === "Escape") {
         finish();
       }
     };
@@ -100,6 +92,7 @@ export function Intro({ close }: { close: () => void }) {
 
     return () => {
       clearTimeout(timer);
+      clearTimeout(exitTimer.current);
       window.removeEventListener("keydown", onKey);
     };
   }, [applyRate, finish]);
@@ -119,13 +112,15 @@ export function Intro({ close }: { close: () => void }) {
         muted
         playsInline
         preload="auto"
+        aria-hidden="true"
         onLoadedMetadata={applyRate}
         onPlay={applyRate}
         onEnded={finish}
         onError={finish}
-      >
-        <source src="/motion/NEWINTRO.mp4" type="video/mp4" />
-      </video>
+      />
+      <button type="button" className="motion-intro-skip" onClick={finish} autoFocus>
+        Skip intro <span aria-hidden="true">↗</span>
+      </button>
     </div>
   );
 }

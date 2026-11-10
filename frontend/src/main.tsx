@@ -23,7 +23,7 @@ import {
   type Org,
   type Invite,
 } from "./client";
-import { AnimalMorphLoader, Intro } from "./Motion";
+import { AnimalMorphLoader, Intro, useReducedMotion } from "./Motion";
 import { Landing } from "./Landing";
 import { SESSION_EXPIRED } from "./LiveEngine";
 import { SiteFooter } from "./SiteFooter";
@@ -554,6 +554,7 @@ const resolvePage = (hash: string) => {
 };
 
 export function App() {
+  const reducedMotion = useReducedMotion();
   const [session, setSession] = useState<Session | null>(null),
     [ready, setReady] = useState(!db),
     [page, setPage] = useState(() => resolvePage(location.hash));
@@ -628,7 +629,7 @@ export function App() {
     setPage(where);
   }
   const overlay =
-    page === "landing" && intro ? (
+    reducedMotion ? null : page === "landing" && intro ? (
       <Intro close={close} />
     ) : morph ? (
       <div className="page-morph" aria-hidden="true">
@@ -638,7 +639,7 @@ export function App() {
   return (
     <>
       {overlay}
-      <div inert={page === "landing" && intro ? true : morph ? true : undefined}>
+      <div inert={overlay !== null}>
         <Suspense fallback={<AnimalMorphLoader />}>
           {view()}
         </Suspense>

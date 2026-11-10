@@ -77,11 +77,15 @@ export function CliPromoSection() {
             </div>
             <div className="cli-term-line">
               <span className="cli-term-prompt">$</span>
-              <span className="cli-term-text">morphy /ask "Revenue trends by region"</span>
+              <span className="cli-term-text">morphy</span>
+            </div>
+            <div className="cli-term-line">
+              <span className="cli-term-prompt">&gt;</span>
+              <span className="cli-term-text">/ask Revenue by product</span>
             </div>
             <div className="cli-term-feedback">
               <span className="cli-term-check">✔</span>
-              <span>Federated SQL generated & executed across 3 engines</span>
+              <span>Example query for the sample workspace</span>
             </div>
           </div>
         </div>
@@ -115,7 +119,7 @@ export function CliPromoSection() {
             </div>
 
             <p className="cli-modal-lead">
-              A full-featured terminal companion powered by the exact same engine, RBAC, and DuckDB/PostgreSQL federation as the browser workspace.
+              Sign in with your MORPHY account, choose a database, and run queries through the same permission checks as the browser workspace.
             </p>
 
             <div className="cli-features-grid">
@@ -144,7 +148,7 @@ export function CliPromoSection() {
 morphy --sql "SELECT * FROM orders LIMIT 5" --json
 
 # Both 'morphy' and 'sq' aliases supported
-sq --database db-1 --sql "SELECT count(*) FROM analytics" --csv`}
+sq --sql "SELECT count(*) FROM orders" --csv`}
               </pre>
             </div>
 
@@ -220,7 +224,7 @@ sq --database db-1 --sql "SELECT count(*) FROM analytics" --csv`}
               <span className="cli-step-num">3</span>
               <div>
                 <strong>Authenticate with your Morphy account:</strong>
-                <pre className="cli-code-pre">morphy /login</pre>
+                <pre className="cli-code-pre">morphy&#10;/login you@example.com</pre>
               </div>
             </div>
 

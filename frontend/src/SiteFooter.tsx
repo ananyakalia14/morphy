@@ -274,7 +274,7 @@ export function SiteFooter() {
                 </li>
                 <li>
                   <a
-                    href="https://github.com"
+                    href="https://github.com/ananyakalia14/morphy"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
