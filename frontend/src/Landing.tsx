@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useReducedMotion } from "./Motion";
+import { HeroBackdrop } from "./HeroBackdrop";
 import { ProductStory } from "./ProductStory";
 import { SiteFooter } from "./SiteFooter";
 import { CliPromoSection } from "./CliPromoSection";
@@ -183,82 +184,22 @@ function LandingNavigation({ signin, animate }: { signin: () => void; animate: b
   );
 }
 
-function MorphArtwork({ animate }: { animate: boolean }) {
-  const video = useRef<HTMLVideoElement>(null);
-  const [ready, setReady] = useState(false);
-  const [loaded, setLoaded] = useState(animate);
-
-  useEffect(() => {
-    if (animate) setLoaded(true);
-  }, [animate]);
-
-  useEffect(() => {
-    const node = video.current;
-    if (!node) return;
-    if (!animate) {
-      node.pause();
-      return;
-    }
-    if (typeof IntersectionObserver === "undefined") {
-      void node.play().catch(() => {});
-      return;
-    }
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry?.isIntersecting) void node.play().catch(() => {});
-      else node.pause();
-    }, { threshold: 0.1 });
-    observer.observe(node);
-    return () => { observer.disconnect(); node.pause(); };
-  }, [animate, loaded]);
-
-  return (
-    <figure className="motion-specimen">
-      <div className="motion-specimen-top"><span><i /> MORPH SEQUENCE</span><span>FIG. 01</span></div>
-      <div className="motion-specimen-stage">
-        <div className="motion-specimen-grid" aria-hidden="true" />
-        <img src="/motion/bull.svg" alt="MORPHY lettering shaped into a bull" fetchPriority="high" />
-        {loaded && (
-          <video
-            ref={video}
-            src="/motion/loader.mp4"
-            className={ready ? "is-ready" : undefined}
-            muted
-            loop
-            playsInline
-            preload="none"
-            aria-hidden="true"
-            onPlaying={() => setReady(true)}
-            onError={() => setReady(false)}
-          />
-        )}
-        <span className="motion-specimen-mark" aria-hidden="true">+</span>
-      </div>
-      <figcaption><span>ONE NAME. SIX FORMS.</span><span aria-hidden="true">01 — 06</span></figcaption>
-    </figure>
-  );
-}
-
 export function Landing({ start, signin }: { start: () => void; signin: () => void }) {
   const reduced = useReducedMotion();
   const [paused, setPaused] = useState(false);
   const animate = !reduced && !paused;
-  const hero = useRef<HTMLElement>(null);
   const sources = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    const lead = hero.current;
     const rail = sources.current;
     const pin = rail?.querySelector<HTMLElement>(".motion-source-pin");
     const track = rail?.querySelector<HTMLElement>(".motion-source-grid");
-    if (!animate || !lead || !rail || !pin || !track) return;
+    if (!animate || !rail || !pin || !track) return;
     const wide = matchMedia("(min-width: 850px) and (min-height: 600px)");
     let frame = 0;
     const clamp = (value: number) => Math.max(0, Math.min(1, value));
     const update = () => {
       frame = 0;
-      const leadBox = lead.getBoundingClientRect();
-      const progress = clamp(-leadBox.top / Math.max(1, leadBox.height * .7));
-      lead.style.setProperty("--hero-scroll", String(progress));
       if (!wide.matches) return;
       const railBox = rail.getBoundingClientRect();
       const pinTop = Number.parseFloat(getComputedStyle(pin).top) || 0;
@@ -275,19 +216,10 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
       cancelAnimationFrame(frame);
       window.removeEventListener("scroll", queue);
       window.removeEventListener("resize", queue);
-      lead.style.removeProperty("--hero-scroll");
       rail.style.removeProperty("--source-x");
       rail.style.removeProperty("--source-progress");
     };
   }, [animate]);
-
-  function shiftHero(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!animate || event.pointerType !== "mouse") return;
-    const stage = event.currentTarget;
-    const { left, top, width, height } = stage.getBoundingClientRect();
-    stage.style.setProperty("--stage-x", `${(event.clientX - left) / width - .5}`);
-    stage.style.setProperty("--stage-y", `${(event.clientY - top) / height - .5}`);
-  }
 
   return (
     <div className={`landing motion-landing${animate ? "" : " motion-disabled"}`} id="top">
@@ -295,29 +227,24 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
       <a className="skip-link" href="#main">Skip to content</a>
       <LandingNavigation signin={signin} animate={animate} />
       <main id="main" tabIndex={-1}>
-        <section className="motion-hero" ref={hero} aria-labelledby="motion-hero-title">
-          <div className="hero-copy motion-copy">
-            <div className="motion-kicker motion-rise" style={{ "--motion-index": 0 } as CSSProperties}><i /> THE POLYGLOT DATA WORKSPACE</div>
-            <div className="motion-stage" onPointerMove={shiftHero} onPointerLeave={(event) => {
-              event.currentTarget.style.removeProperty("--stage-x");
-              event.currentTarget.style.removeProperty("--stage-y");
-            }}>
+        <section className="motion-hero" aria-labelledby="motion-hero-title">
+          <HeroBackdrop reduced={reduced} paused={paused} />
+          <div className="motion-hero-content motion-wrap">
+            <div className="hero-copy motion-copy">
+              <div className="motion-kicker motion-rise" style={{ "--motion-index": 0 } as CSSProperties}><i /> THE POLYGLOT DATA WORKSPACE</div>
               <h1 id="motion-hero-title" aria-label="Data takes shape.">
                 {["DATA", "TAKES", "SHAPE."].map((word, i) => <span key={word} className="motion-title-line" aria-hidden="true"><span className="motion-title-mask" style={{ "--motion-index": i } as CSSProperties}>{word}</span></span>)}
               </h1>
-              <MorphArtwork animate={animate} />
-            </div>
-            <div className="motion-hero-bottom">
               <p className="motion-rise" style={{ "--motion-index": 4 } as CSSProperties}>Ask questions across your databases, review the SQL, and share answers within the access rules your team sets.</p>
               <div className="motion-hero-actions motion-rise" style={{ "--motion-index": 5 } as CSSProperties}>
                 <button className="primary motion-primary" type="button" onClick={start}>Create workspace <b aria-hidden="true">↗</b></button>
                 <a className="motion-text-link" href="#explore">Try a sample query <span aria-hidden="true">→</span></a>
               </div>
             </div>
-          </div>
-          <div className="motion-hero-meta">
-            <a href="#workflow" className="motion-text-link">See how it works <span aria-hidden="true">↓</span></a>
-            {!reduced && <button type="button" className="motion-pause" onClick={() => setPaused((value) => !value)}>{paused ? "Play motion" : "Pause motion"} <span aria-hidden="true">{paused ? "▷" : "Ⅱ"}</span></button>}
+            <div className="motion-hero-meta">
+              <a href="#workflow" className="motion-text-link">See how it works <span aria-hidden="true">↓</span></a>
+              {!reduced && <button type="button" className="motion-pause" onClick={() => setPaused((value) => !value)}>{paused ? "Play motion" : "Pause motion"} <span aria-hidden="true">{paused ? "▷" : "Ⅱ"}</span></button>}
+            </div>
           </div>
         </section>
 
