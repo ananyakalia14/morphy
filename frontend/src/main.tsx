@@ -24,7 +24,8 @@ import {
 } from "./client";
 import { AnimalMorphLoader, Intro, useReducedMotion } from "./Motion";
 import { Landing } from "./Landing";
-import { SESSION_EXPIRED } from "./LiveEngine";
+import { SESSION_EXPIRED } from "./engineBase";
+import { useConstrainedConnection } from "./connection";
 import { SiteFooter } from "./SiteFooter";
 
 // Lazy-load heavier routes for instant initial landing load
@@ -390,6 +391,7 @@ const resolvePage = (hash: string) => {
 
 export function App() {
   const reducedMotion = useReducedMotion();
+  const constrained = useConstrainedConnection();
   const [session, setSession] = useState<Session | null>(null),
     [ready, setReady] = useState(!db),
     [page, setPage] = useState(() => resolvePage(location.hash));
@@ -397,42 +399,27 @@ export function App() {
     () =>
       location.hash === "" &&
       sessionStorage.getItem("morphy-intro-dismissed") !== "1" &&
-      !matchMedia("(prefers-reduced-motion: reduce)").matches,
+      !reducedMotion && !constrained && !matchMedia("(max-width: 780px)").matches,
   );
-  const [morph, setMorph] = useState(() => {
-    // Show loader on refresh / initial load if not showing intro video on landing
-    const isIntroOnLanding =
-      location.hash === "" &&
-      sessionStorage.getItem("morphy-intro-dismissed") !== "1" &&
-      !matchMedia("(prefers-reduced-motion: reduce)").matches;
-    return !isIntroOnLanding;
-  });
+  const showIntro = page === "landing" && intro && !reducedMotion && !constrained;
   const [expiredNote, setExpiredNote] = useState(false);
   useEffect(() => {
     if (session) sessionStorage.removeItem("morphy-expired");
     setExpiredNote(!session && sessionStorage.getItem("morphy-expired") === "1");
   }, [session, page]);
-  useEffect(() => {
-    if (morph) {
-      const t = setTimeout(() => setMorph(false), 1100);
-      return () => clearTimeout(t);
-    }
-  }, []);
+  useEffect(() => { if (reducedMotion || constrained) setIntro(false); }, [reducedMotion, constrained]);
   const first = useRef(true);
   useEffect(() => {
     if (first.current) {
       first.current = false;
       return;
     }
-    window.scrollTo(0, 0);
-    setMorph(true);
-    const t = setTimeout(() => setMorph(false), 1100);
-    return () => clearTimeout(t);
+    window.scrollTo({ top: 0, behavior: "instant" });
   }, [page, session?.user.id]);
-  const close = useCallback(() => {
+  const close = useCallback((focusHero = true) => {
     sessionStorage.setItem("morphy-intro-dismissed", "1");
     setIntro(false);
-    requestAnimationFrame(() =>
+    if (focusHero) requestAnimationFrame(() =>
       document
         .querySelector<HTMLButtonElement>(".hero-copy .primary")
         ?.focus({ preventScroll: true }),
@@ -465,18 +452,10 @@ export function App() {
     location.hash = where === "landing" ? "" : where;
     setPage(where);
   }
-  const overlay =
-    reducedMotion ? null : page === "landing" && intro ? (
-      <Intro close={close} />
-    ) : morph ? (
-      <div className="page-morph" aria-hidden="true">
-        <AnimalMorphLoader label="Loading Morphy" />
-      </div>
-    ) : null;
   return (
     <>
-      {overlay}
-      <div inert={overlay !== null}>
+      {showIntro && <Intro close={close} />}
+      <div inert={showIntro}>
         <Suspense fallback={<AnimalMorphLoader />}>
           {view()}
         </Suspense>
@@ -511,7 +490,7 @@ export function App() {
           }
         />
       );
-    return <Landing start={() => go("signup")} signin={() => go("signin")} />;
+    return <Landing start={() => go("signup")} signin={() => go("signin")} deferVideo={showIntro || constrained} />;
   }
 }
 

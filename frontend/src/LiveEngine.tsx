@@ -3,7 +3,7 @@ import { db, remoteSource, rows, type Source } from "./client";
 import { AnimalMorphLoader } from "./Motion";
 import { saveQuery } from "./Library";
 import { createLatest } from "./latest";
-import { ENGINE_BASE } from "./engineBase";
+import { ENGINE_BASE, SESSION_EXPIRED } from "./engineBase";
 
 export type Result = {
   columns: string[];
@@ -31,8 +31,6 @@ function sqlIdentifier(name: string, dialect: string) {
   const quote = dialect === "mysql" || dialect === "mariadb" ? "`" : '"';
   return quote + name.replaceAll(quote, quote + quote) + quote;
 }
-
-export const SESSION_EXPIRED = "morphy:session-expired";
 
 export async function engine<T>(
   database: string,

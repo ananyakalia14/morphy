@@ -185,7 +185,7 @@ function LandingNavigation({ signin, animate }: { signin: () => void; animate: b
   );
 }
 
-export function Landing({ start, signin }: { start: () => void; signin: () => void }) {
+export function Landing({ start, signin, deferVideo }: { start: () => void; signin: () => void; deferVideo: boolean }) {
   const reduced = useReducedMotion();
   const animate = !reduced;
   const sources = useRef<HTMLElement>(null);
@@ -228,7 +228,7 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
       <LandingNavigation signin={signin} animate={animate} />
       <main id="main" tabIndex={-1}>
         <section className="motion-hero" aria-labelledby="motion-hero-title">
-          <HeroBackdrop reduced={reduced} />
+          <HeroBackdrop reduced={reduced || deferVideo} />
           <div className="motion-hero-content motion-wrap">
             <div className="hero-copy motion-copy">
               <div className="motion-kicker motion-rise" style={{ "--motion-index": 0 } as CSSProperties}><i /> THE POLYGLOT DATA WORKSPACE</div>

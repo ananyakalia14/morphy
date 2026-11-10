@@ -7,7 +7,7 @@ export function HeroBackdrop({ reduced }: { reduced: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const [compact, setCompact] = useState(() => matchMedia(COMPACT_VIEWPORT).matches);
   const [failedSource, setFailedSource] = useState<string>();
-  const src = compact ? "/motion/morphy_databases_v2_loop_540.mp4" : "/motion/morphy_databases_v2_loop.mp4";
+  const src = compact ? "/motion/database-loop-mobile.mp4" : "/motion/database-loop-web.mp4";
   const showVideo = !reduced && src !== failedSource;
 
   useEffect(() => {
@@ -42,7 +42,7 @@ export function HeroBackdrop({ reduced }: { reduced: boolean }) {
           muted
           loop
           playsInline
-          preload="metadata"
+          preload="none"
           poster={POSTER}
           onError={() => setFailedSource(src)}
         />
