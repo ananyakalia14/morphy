@@ -1,254 +1,133 @@
-import { useState } from "react";
-import { Terminal, Download, Check, Copy, X } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { Check, Copy, Download, Terminal, X } from "lucide-react";
+
+const INSTALL = "python -m pip install morphy-cli";
+const HOSTED = "morphy --url https://morphy-engine.vercel.app";
+const STEPS = [
+  {
+    name: "Open",
+    prompt: "$",
+    command: HOSTED,
+    detail: "Open the public sample workspace from any terminal with MORPHY installed.",
+    output: "morphy (sample) >",
+  },
+  {
+    name: "Explore",
+    prompt: ">",
+    command: "/examples",
+    detail: "List the questions available for this sample dataset.",
+    output: "• Revenue by product\n• Monthly revenue\n• Top customers\n• Recent orders",
+  },
+  {
+    name: "Query",
+    prompt: ">",
+    command: "/ask Revenue by product",
+    detail: "The sample shows the SQL and results. For a live database, /ask shows the draft and asks before executing it.",
+    output: "SELECT product, ROUND(SUM(amount), 2) AS revenue\nFROM orders WHERE status = 'paid'\nGROUP BY product ORDER BY revenue DESC\n\nproduct    │ revenue\nAnalytics  │ 6900.0\nWorkspace  │ 3020.0\nConnectors │ 1730.0",
+  },
+  {
+    name: "Export",
+    prompt: ">",
+    command: "/export revenue.csv",
+    detail: "Write the last query result to a CSV in your current directory.",
+    output: "Saved 3 rows to revenue.csv.",
+  },
+] as const;
 
 export function CliPromoSection() {
-  const [cliModal, setCliModal] = useState<"explore" | "install" | null>(null);
-  const [copiedSnippet, setCopiedSnippet] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const [view, setView] = useState<"explore" | "install">("explore");
+  const [step, setStep] = useState(0);
+  const [copyStatus, setCopyStatus] = useState("");
+  const current = STEPS[step]!;
 
-  const copyInstall = () => {
-    navigator.clipboard.writeText("python -m pip install -e ./cli && morphy --help");
-    setCopiedSnippet(true);
-    setTimeout(() => setCopiedSnippet(false), 2000);
-  };
+  function open(next: typeof view) {
+    setView(next);
+    setStep(0);
+    setCopyStatus("");
+    dialog.current?.showModal();
+  }
+
+  async function copy(command: string) {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopyStatus("Command copied.");
+    } catch {
+      setCopyStatus("Select the command text to copy it.");
+    }
+  }
 
   return (
     <>
       <div className="cli-promo-card">
         <div className="cli-promo-content">
-          <div className="cli-promo-badge">
-            <Terminal className="w-3.5 h-3.5" />
-            <span>DEVELOPER TOOLKIT</span>
-          </div>
+          <div className="cli-promo-badge"><Terminal className="w-3.5 h-3.5" /> DEVELOPER TOOLKIT</div>
           <h2 className="cli-promo-heading">MORPHY, beyond the browser.</h2>
-          <p className="cli-promo-description">
-            Take your database workspace to the terminal. Query, inspect and interact with your data using MORPHY CLI — powered by the same governed engine.
-          </p>
+          <p className="cli-promo-description">Inspect schemas, review SQL, and export results from your terminal using the same MORPHY engine.</p>
           <div className="cli-promo-buttons">
-            <button
-              type="button"
-              className="cli-cta-primary"
-              onClick={() => setCliModal("explore")}
-            >
-              <Terminal className="w-4 h-4 mr-2" />
-              Explore CLI
+            <button type="button" className="cli-cta-primary" onClick={() => open("explore")}>
+              <Terminal className="w-4 h-4 mr-2" /> Explore CLI
             </button>
-            <button
-              type="button"
-              className="cli-cta-secondary"
-              onClick={() => setCliModal("install")}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              View installation guide
+            <button type="button" className="cli-cta-secondary" onClick={() => open("install")}>
+              <Download className="w-4 h-4 mr-2" /> View installation guide
             </button>
           </div>
         </div>
-
         <div className="cli-promo-terminal-box">
           <div className="cli-terminal-top">
-            <div className="cli-window-dots">
-              <span className="window-dot red" />
-              <span className="window-dot yellow" />
-              <span className="window-dot green" />
-            </div>
-            <span className="cli-window-title">terminal — morphy</span>
-            <button
-              type="button"
-              className="cli-copy-btn"
-              onClick={copyInstall}
-              title="Copy install snippet"
-            >
-              {copiedSnippet ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy</span>
-                </>
-              )}
-            </button>
+            <div className="cli-window-dots" aria-hidden="true"><span className="window-dot red" /><span className="window-dot yellow" /><span className="window-dot green" /></div>
+            <span className="cli-window-title">terminal · synthetic sample</span>
           </div>
           <div className="cli-terminal-screen">
-            <div className="cli-term-line">
-              <span className="cli-term-prompt">$</span>
-              <span className="cli-term-text">python -m pip install -e ./cli</span>
-            </div>
-            <div className="cli-term-line">
-              <span className="cli-term-prompt">$</span>
-              <span className="cli-term-text">morphy</span>
-            </div>
-            <div className="cli-term-line">
-              <span className="cli-term-prompt">&gt;</span>
-              <span className="cli-term-text">/ask Revenue by product</span>
-            </div>
-            <div className="cli-term-feedback">
-              <span className="cli-term-check">✔</span>
-              <span>Example query for the sample workspace</span>
-            </div>
+            <div className="cli-term-line"><span className="cli-term-prompt">$</span><code className="cli-term-text">{INSTALL}</code></div>
+            <div className="cli-term-line"><span className="cli-term-prompt">$</span><code className="cli-term-text">{HOSTED}</code></div>
+            <div className="cli-term-line"><span className="cli-term-prompt">&gt;</span><code className="cli-term-text">/ask Revenue by product</code></div>
+            <div className="cli-term-feedback"><Check size={14} aria-hidden="true" /> Three products in the sample result</div>
           </div>
         </div>
       </div>
 
-      {/* Explore CLI Modal */}
-      {cliModal === "explore" && (
-        <div
-          className="workspace-modal-overlay"
-          onClick={() => setCliModal(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            className="workspace-modal-panel cli-detail-modal"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="workspace-modal-header">
-              <div>
-                <div className="workspace-modal-eyebrow">TERMINAL WORKSPACE</div>
-                <h2 className="workspace-modal-title">MORPHY CLI Features</h2>
-              </div>
-              <button
-                type="button"
-                className="workspace-modal-close-btn"
-                onClick={() => setCliModal(null)}
-                aria-label="Close dialog"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="cli-modal-lead">
-              Sign in with your MORPHY account, choose a database, and run queries through the same permission checks as the browser workspace.
-            </p>
-
-            <div className="cli-features-grid">
-              <div className="cli-feature-item">
-                <code>/ask &lt;query&gt;</code>
-                <p>Natural language AI query generation with pre-execution safety review.</p>
-              </div>
-              <div className="cli-feature-item">
-                <code>/sql &lt;SELECT&gt;</code>
-                <p>Run governed read-only SQL queries with syntax highlighting and schema hints.</p>
-              </div>
-              <div className="cli-feature-item">
-                <code>/dashboard</code>
-                <p>Render interactive terminal dashboards directly inside your console.</p>
-              </div>
-              <div className="cli-feature-item">
-                <code>/export &lt;file.csv&gt;</code>
-                <p>Stream query results to RFC-4180 CSV or formatted JSON for shell pipelines.</p>
-              </div>
-            </div>
-
-            <div className="cli-modal-code-block">
-              <div className="cli-code-header">One-Shot Scripting & Automation</div>
-              <pre className="cli-code-pre">
-{`# Run non-interactive queries directly in scripts
-morphy --sql "SELECT * FROM orders LIMIT 5" --json
-
-# Both 'morphy' and 'sq' aliases supported
-sq --sql "SELECT count(*) FROM orders" --csv`}
-              </pre>
-            </div>
-
-            <div className="workspace-modal-actions">
-              <button
-                type="button"
-                className="workspace-btn-secondary"
-                onClick={() => setCliModal("install")}
-              >
-                <Download className="w-4 h-4 mr-2" />
-                View installation guide
-              </button>
-              <button
-                type="button"
-                className="workspace-btn-primary"
-                onClick={() => setCliModal(null)}
-              >
-                Done
-              </button>
-            </div>
+      <dialog ref={dialog} className="workspace-modal-panel cli-walkthrough" aria-labelledby={titleId}>
+        <div className="workspace-modal-header">
+          <div>
+            <div className="workspace-modal-eyebrow">TERMINAL WORKSPACE</div>
+            <h2 id={titleId} className="workspace-modal-title">{view === "explore" ? "Run a query in the CLI" : "Install MORPHY CLI"}</h2>
           </div>
+          <button type="button" className="workspace-modal-close-btn" aria-label="Close dialog" onClick={() => dialog.current?.close()} autoFocus><X size={20} /></button>
         </div>
-      )}
 
-      {/* Installation Guide Modal */}
-      {cliModal === "install" && (
-        <div
-          className="workspace-modal-overlay"
-          onClick={() => setCliModal(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            className="workspace-modal-panel cli-detail-modal"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="workspace-modal-header">
-              <div>
-                <div className="workspace-modal-eyebrow">GETTING STARTED</div>
-                <h2 className="workspace-modal-title">MORPHY CLI Installation Guide</h2>
-              </div>
-              <button
-                type="button"
-                className="workspace-modal-close-btn"
-                onClick={() => setCliModal(null)}
-                aria-label="Close dialog"
-              >
-                <X className="w-5 h-5" />
-              </button>
+        {view === "explore" ? (
+          <>
+            <p className="cli-modal-lead">Step through a recorded example using synthetic commerce data.</p>
+            <div className="cli-walkthrough-steps" role="group" aria-label="CLI walkthrough steps">
+              {STEPS.map(({ name }, index) => (
+                <button type="button" key={name} aria-pressed={index === step} onClick={() => { setStep(index); setCopyStatus(""); }}>{index + 1}. {name}</button>
+              ))}
             </div>
-
-            <p className="cli-modal-lead">
-              Works seamlessly on <strong>Windows</strong>, <strong>macOS</strong>, and <strong>Linux</strong> with Python 3.11+.
-            </p>
-
-            <div className="cli-install-step">
-              <span className="cli-step-num">1</span>
-              <div>
-                <strong>Install via pip from repository root:</strong>
-                <pre className="cli-code-pre">python -m pip install -e ./cli</pre>
-              </div>
+            <div className="cli-walkthrough-console" aria-live="polite">
+              <pre><code><span aria-hidden="true">{current.prompt} </span>{current.command}</code>{"\n\n"}{current.output}</pre>
             </div>
+            <p className="cli-modal-lead">{current.detail}</p>
+          </>
+        ) : (
+          <>
+            <p className="cli-modal-lead">Use Python 3.11 or later. These commands install the published package and open the sample workspace.</p>
+            <div className="cli-walkthrough-console"><pre><code>{INSTALL}{"\n"}{HOSTED}</code></pre></div>
+            <p className="cli-modal-lead">For an organization database, configure the CLI for your MORPHY Supabase project, then use <code>/login</code>, <code>/orgs</code>, <code>/use-org</code>, <code>/dbs</code>, and <code>/use-db</code> inside the shell. <a href="https://github.com/ananyakalia14/morphy/tree/main/cli#installation--setup">Read the CLI setup guide</a>.</p>
+          </>
+        )}
 
-            <div className="cli-install-step">
-              <span className="cli-step-num">2</span>
-              <div>
-                <strong>Verify installation (both console aliases):</strong>
-                <pre className="cli-code-pre">morphy --help&#10;sq --help</pre>
-              </div>
-            </div>
-
-            <div className="cli-install-step">
-              <span className="cli-step-num">3</span>
-              <div>
-                <strong>Authenticate with your Morphy account:</strong>
-                <pre className="cli-code-pre">morphy&#10;/login you@example.com</pre>
-              </div>
-            </div>
-
-            <div className="workspace-modal-actions">
-              <button
-                type="button"
-                className="workspace-btn-secondary"
-                onClick={() => setCliModal("explore")}
-              >
-                <Terminal className="w-4 h-4 mr-2" />
-                Explore CLI
-              </button>
-              <button
-                type="button"
-                className="workspace-btn-primary"
-                onClick={() => setCliModal(null)}
-              >
-                Close Guide
-              </button>
-            </div>
-          </div>
+        <div className="workspace-modal-actions cli-walkthrough-actions">
+          <button type="button" className="workspace-btn-secondary" onClick={() => void copy(view === "explore" ? current.command : INSTALL)}><Copy size={15} /> {view === "explore" ? "Copy command" : "Copy install command"}</button>
+          {view === "explore" ? (
+            <button type="button" className="workspace-btn-primary" onClick={() => { setView("install"); setCopyStatus(""); }}>Installation guide</button>
+          ) : (
+            <button type="button" className="workspace-btn-primary" onClick={() => { setView("explore"); setCopyStatus(""); }}>Explore CLI</button>
+          )}
         </div>
-      )}
+        <p className="cli-walkthrough-status" role="status">{copyStatus}</p>
+      </dialog>
     </>
   );
 }
-

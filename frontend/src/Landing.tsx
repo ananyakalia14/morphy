@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { FileSpreadsheet } from "lucide-react";
 import { useReducedMotion } from "./Motion";
 import { HeroBackdrop } from "./HeroBackdrop";
 import { ProductStory } from "./ProductStory";
@@ -15,10 +16,10 @@ const SECTIONS = [
 ] as const;
 
 const SOURCES = [
-  ["PG", "PostgreSQL", "Read-only connection"],
-  ["MY", "MySQL", "Read-only connection"],
-  ["MA", "MariaDB", "Read-only connection"],
-  ["CSV", "CSV", "File import into SQLite"],
+  ["PostgreSQL", "Read-only connection", "postgresql.svg"],
+  ["MySQL", "Read-only connection", "mysql.svg"],
+  ["MariaDB", "Read-only connection", "mariadb.svg"],
+  ["CSV", "File import into SQLite", null],
 ] as const;
 
 const SIGNALS = ["REVIEWABLE SQL", "ROW & COLUMN CONTROLS", "READ-ONLY EXECUTION", "WEB + TERMINAL"];
@@ -186,8 +187,7 @@ function LandingNavigation({ signin, animate }: { signin: () => void; animate: b
 
 export function Landing({ start, signin }: { start: () => void; signin: () => void }) {
   const reduced = useReducedMotion();
-  const [paused, setPaused] = useState(false);
-  const animate = !reduced && !paused;
+  const animate = !reduced;
   const sources = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -228,7 +228,7 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
       <LandingNavigation signin={signin} animate={animate} />
       <main id="main" tabIndex={-1}>
         <section className="motion-hero" aria-labelledby="motion-hero-title">
-          <HeroBackdrop reduced={reduced} paused={paused} />
+          <HeroBackdrop reduced={reduced} />
           <div className="motion-hero-content motion-wrap">
             <div className="hero-copy motion-copy">
               <div className="motion-kicker motion-rise" style={{ "--motion-index": 0 } as CSSProperties}><i /> THE POLYGLOT DATA WORKSPACE</div>
@@ -243,7 +243,6 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
             </div>
             <div className="motion-hero-meta">
               <a href="#workflow" className="motion-text-link">See how it works <span aria-hidden="true">↓</span></a>
-              {!reduced && <button type="button" className="motion-pause" onClick={() => setPaused((value) => !value)}>{paused ? "Play motion" : "Pause motion"} <span aria-hidden="true">{paused ? "▷" : "Ⅱ"}</span></button>}
             </div>
           </div>
         </section>
@@ -263,9 +262,18 @@ export function Landing({ start, signin }: { start: () => void; signin: () => vo
               <h2 id="motion-sources-title">Start with the data you have.</h2>
               <p>Connect a read-only database or import a CSV. Set which tables, columns, and rows each role can query.</p>
             </div>
-            <div className="motion-source-window">
+            <div className="motion-source-window" role="region" aria-label="Supported source cards" tabIndex={0}>
               <ul className="motion-source-grid">
-                {SOURCES.map(([initials, name, mode], i) => <li key={name}><span className="motion-source-chip" aria-hidden="true">{initials}</span><span className="motion-source-number" aria-hidden="true">0{i + 1} / 04</span><h3>{name}</h3><p>{mode}</p></li>)}
+                {SOURCES.map(([name, mode, logo], i) => (
+                  <li key={name}>
+                    <span className="motion-source-chip" aria-hidden="true">
+                      {logo ? <img src={`/connectors/${logo}`} alt="" width="32" height="32" decoding="async" /> : <FileSpreadsheet size={32} />}
+                    </span>
+                    <span className="motion-source-number" aria-hidden="true">0{i + 1} / 04</span>
+                    <h3>{name}</h3>
+                    <p>{mode}</p>
+                  </li>
+                ))}
               </ul>
             </div>
             <div className="motion-source-progress" aria-hidden="true"><span /></div>

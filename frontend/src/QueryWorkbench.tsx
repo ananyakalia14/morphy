@@ -1,6 +1,6 @@
-const ENGINE: string = import.meta.env["VITE_ENGINE_URL"] || "/api";
 import { useEffect, useState } from "react";
 import { AnimalMorphLoader } from "./Motion";
+import { ENGINE_BASE } from "./engineBase";
 
 type Metadata = {
   name: string;
@@ -20,7 +20,7 @@ type Result = {
 };
 
 async function api<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(ENGINE + "/" + path, {
+  const response = await fetch(ENGINE_BASE + "/" + path, {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : null,

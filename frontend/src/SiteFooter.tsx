@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import {
   X,
-  Terminal,
   Shield,
   FileText,
   HelpCircle,
@@ -9,16 +8,13 @@ import {
   BookOpen,
   Layers,
   Check,
-  Copy,
   ExternalLink,
-  Download,
 } from "lucide-react";
 
 export function SiteFooter() {
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
   const [modal, setModal] = useState<string | null>(null);
-  const [copiedCli, setCopiedCli] = useState(false);
 
   // Contact form state inside modal
   const [contactName, setContactName] = useState("");
@@ -241,11 +237,7 @@ export function SiteFooter() {
               <ul>
                 <li>
                   <a
-                    href="#cli"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setModal("cli");
-                    }}
+                    href="#terminal"
                   >
                     CLI Installation
                   </a>
@@ -370,86 +362,6 @@ export function SiteFooter() {
       {/* =========================================================================
           INFORMATIONAL & POLICY MODALS
           ========================================================================= */}
-
-      {/* CLI Installation Modal */}
-      {modal === "cli" && (
-        <div
-          className="workspace-modal-overlay"
-          onClick={() => setModal(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            className="workspace-modal-panel footer-modal-panel"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="workspace-modal-header">
-              <div>
-                <div className="workspace-modal-eyebrow">DEVELOPER TOOLKIT</div>
-                <h2 className="workspace-modal-title">MORPHY CLI Installation</h2>
-              </div>
-              <button
-                type="button"
-                className="workspace-modal-close-btn"
-                onClick={() => setModal(null)}
-                aria-label="Close modal"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="cli-modal-lead">
-              Query, inspect, and automate your governed data directly from Windows PowerShell, macOS Terminal, or Linux.
-            </p>
-
-            <div className="cli-install-step">
-              <span className="cli-step-num">1</span>
-              <div>
-                <strong>Install via pip from repository root:</strong>
-                <pre className="cli-code-pre">python -m pip install -e ./cli</pre>
-              </div>
-            </div>
-
-            <div className="cli-install-step">
-              <span className="cli-step-num">2</span>
-              <div>
-                <strong>Verify installation (both console aliases):</strong>
-                <pre className="cli-code-pre">morphy --help&#10;sq --help</pre>
-              </div>
-            </div>
-
-            <div className="cli-install-step">
-              <span className="cli-step-num">3</span>
-              <div>
-                <strong>Authenticate with your Morphy workspace:</strong>
-                <pre className="cli-code-pre">morphy /login</pre>
-              </div>
-            </div>
-
-            <div className="workspace-modal-actions">
-              <button
-                type="button"
-                className="workspace-btn-secondary"
-                onClick={() => {
-                  navigator.clipboard.writeText("python -m pip install -e ./cli");
-                  setCopiedCli(true);
-                  setTimeout(() => setCopiedCli(false), 2000);
-                }}
-              >
-                {copiedCli ? <Check className="w-4 h-4 mr-2 text-emerald-600" /> : <Copy className="w-4 h-4 mr-2" />}
-                {copiedCli ? "Copied Command" : "Copy Install Command"}
-              </button>
-              <button
-                type="button"
-                className="workspace-btn-primary"
-                onClick={() => setModal(null)}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Documentation Modal */}
       {modal === "docs" && (

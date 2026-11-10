@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 const POSTER = "/motion/morphy_databases_v2_poster.jpg";
 const COMPACT_VIEWPORT = "(max-width: 780px)";
 
-export function HeroBackdrop({ reduced, paused }: { reduced: boolean; paused: boolean }) {
+export function HeroBackdrop({ reduced }: { reduced: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const [compact, setCompact] = useState(() => matchMedia(COMPACT_VIEWPORT).matches);
   const [failedSource, setFailedSource] = useState<string>();
@@ -19,7 +19,7 @@ export function HeroBackdrop({ reduced, paused }: { reduced: boolean; paused: bo
 
   useEffect(() => {
     const node = video.current;
-    if (!node || paused) return;
+    if (!node) return;
     if (typeof IntersectionObserver === "undefined") {
       void node.play().catch(() => {});
       return () => node.pause();
@@ -30,7 +30,7 @@ export function HeroBackdrop({ reduced, paused }: { reduced: boolean; paused: bo
     });
     observer.observe(node);
     return () => { observer.disconnect(); node.pause(); };
-  }, [paused, showVideo, src]);
+  }, [showVideo, src]);
 
   return (
     <div className="hero-backdrop" aria-hidden="true">
